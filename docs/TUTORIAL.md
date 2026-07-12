@@ -312,13 +312,15 @@ than its own memory.
 nothing goes to GPU, everything runs on CPU, which is why it's slow but also
 why it never touches VRAM at all and can safely coexist with mining.
 
-The context-length numbers (2048 for Scout, 4096 for Qwen in GPU mode; 4096
-for both in CPU-only mode) matter for the same VRAM-budget reason: the
+The context-length numbers matter for the same VRAM-budget reason: the
 context window determines the size of the KV cache, which is additional
-memory that has to sit alongside the model's GPU-resident weights. In
-CPU-only mode there's no VRAM budget to protect, so both models get the
-larger, more usable 4096 context; in GPU mode the context is sized smaller
-to leave room for the weights that are actually on the card.
+memory that has to sit alongside the model's GPU-resident weights. Both
+models use a 4096 context in CPU-only mode, where there's no VRAM budget to
+protect. In GPU mode, Scout's context is trimmed to 2048 specifically to
+leave more VRAM headroom for its GPU-resident weights, while Qwen stays at
+4096 in GPU mode too. Same mechanism (context size trades off against
+VRAM for weights), just applied more conservatively for Scout than for
+Qwen in this configuration.
 
 One more small design detail worth understanding while you're in this
 territory: `start-model.sh` doesn't just fire off `llama-server` and assume
