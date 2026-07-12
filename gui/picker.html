@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local LLM Picker</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f7;
+    --card-bg: #ffffff;
+    --text: #1b1b1f;
+    --muted: #6b6b76;
+    --border: #dcdce2;
+    --accent: #2f6fed;
+    --accent-text: #ffffff;
+    --code-bg: #eef0f5;
+    --ok: #1f8a4c;
+    --err: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1e;
+      --card-bg: #232327;
+      --text: #ececf1;
+      --muted: #9a9aa3;
+      --border: #38383f;
+      --accent: #5b8dff;
+      --accent-text: #0d1117;
+      --code-bg: #17171a;
+      --ok: #3fbf72;
+      --err: #ff6b5e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 2rem 1rem;
+  }
+  .wrap {
+    width: 100%;
+    max-width: 560px;
+  }
+  h1 {
+    font-size: 1.4rem;
+    margin: 0 0 0.25rem;
+  }
+  .sub {
+    color: var(--muted);
+    margin: 0 0 1.75rem;
+    font-size: 0.92rem;
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .card h2 {
+    margin: 0 0 0.15rem;
+    font-size: 1.05rem;
+  }
+  .card p.desc {
+    margin: 0 0 0.9rem;
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+  button.launch {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    font-size: 0.98rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 9px;
+    background: var(--accent);
+    color: var(--accent-text);
+    cursor: pointer;
+  }
+  button.launch:active { transform: translateY(1px); }
+  button.launch:disabled { opacity: 0.6; cursor: default; }
+  .fallback {
+    margin-top: 0.75rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  pre.cmd {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.55rem 0.7rem;
+    margin: 0.4rem 0 0;
+    font-size: 0.82rem;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .status {
+    margin-top: 0.7rem;
+    font-size: 0.85rem;
+    min-height: 1.1em;
+  }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  .status.pending { color: var(--muted); }
+  footer {
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin-top: 1.5rem;
+    line-height: 1.5;
+  }
+  footer code {
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 0.05rem 0.3rem;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Local LLM</h1>
+  <p class="sub">Pick a model. Each launches its own llama.cpp chat window (CPU-only, safe to run alongside mining).</p>
+
+  <div class="card">
+    <h2>Coding: Qwen3-Coder-Next</h2>
+    <p class="desc">Qwen3-Coder-Next-UD-Q4_K_M &middot; port 8091</p>
+    <button class="launch" data-model="qwen">Launch Qwen</button>
+    <div class="status" id="status-qwen"></div>
+    <div class="fallback">
+      If the button doesn't work (server not running), run this from the project root instead:
+      <pre class="cmd">./gui/launch.sh qwen</pre>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>General: Llama-4-Scout</h2>
+    <p class="desc">Llama-4-Scout-17B-16E-Instruct-Q4_K_M &middot; port 8090</p>
+    <button class="launch" data-model="scout">Launch Scout</button>
+    <div class="status" id="status-scout"></div>
+    <div class="fallback">
+      If the button doesn't work (server not running), run this from the project root instead:
+      <pre class="cmd">./gui/launch.sh scout</pre>
+    </div>
+  </div>
+
+  <footer>
+    Buttons POST to a local <code>picker_server.py</code> backend (if it's running) which shells out to
+    <code>gui/launch.sh &lt;model&gt;</code>. That script starts the model CPU-only via
+    <code>bin/start-model.sh &lt;model&gt; --cpu-only</code> if it isn't already up, then opens the model's
+    built-in chat webui in its own app-mode browser window. Loading is slow on CPU-only &mdash; give it a
+    minute after the button reports "launching".
+  </footer>
+</div>
+
+<script>
+(function () {
+  var buttons = document.querySelectorAll("button.launch");
+  buttons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var model = btn.getAttribute("data-model");
+      var statusEl = document.getElementById("status-" + model);
+      btn.disabled = true;
+      statusEl.className = "status pending";
+      statusEl.textContent = "Requesting launch...";
+
+      fetch("/launch/" + model, { method: "POST" })
+        .then(function (res) {
+          return res.json().then(function (data) {
+            return { ok: res.ok, data: data };
+          });
+        })
+        .then(function (result) {
+          if (result.ok) {
+            statusEl.className = "status ok";
+            statusEl.textContent =
+              "Launching " + model + " -> " + result.data.url +
+              " (CPU-only load can take a while; a browser window will open once it's ready).";
+          } else {
+            statusEl.className = "status err";
+            statusEl.textContent = "Error: " + (result.data.error || "unknown error");
+          }
+        })
+        .catch(function () {
+          statusEl.className = "status err";
+          statusEl.textContent =
+            "No response from picker_server.py. Run the command below manually instead.";
+        })
+        .finally(function () {
+          btn.disabled = false;
+        });
+    });
+  });
+})();
+</script>
+</body>
+</html>

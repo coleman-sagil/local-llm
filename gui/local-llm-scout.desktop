@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Local LLM: Scout (General)
+GenericName=Local Chat - Llama-4-Scout
+Comment=Chat with locally-served Llama-4-Scout-17B via llama.cpp (CPU-only, app-mode browser window)
+Exec=/home/mateo/local-llm/gui/launch.sh scout
+Icon=web-browser
+Terminal=false
+Categories=Development;
+StartupNotify=true

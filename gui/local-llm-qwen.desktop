@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Local LLM: Qwen3-Coder (Coding)
+GenericName=Local Chat - Qwen3-Coder-Next
+Comment=Chat with locally-served Qwen3-Coder-Next via llama.cpp (CPU-only, app-mode browser window)
+Exec=/home/mateo/local-llm/gui/launch.sh qwen
+Icon=web-browser
+Terminal=false
+Categories=Development;
+StartupNotify=true
