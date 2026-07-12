@@ -78,6 +78,14 @@ def stream_chat(base_url: str, messages: list) -> str:
         timeout=(REQUEST_TIMEOUT_CONNECT, None),  # no read timeout; tokens can be slow on CPU
     )
     resp.raise_for_status()
+    # llama-server's SSE response has no charset in its Content-Type
+    # (text/event-stream), so requests falls back to guessing ISO-8859-1 for
+    # text/* bodies without one. iter_lines(decode_unicode=True) decodes
+    # using that guess, silently mangling any non-ASCII UTF-8 byte (emoji,
+    # accents, curly quotes) into mojibake - and that corrupted text is what
+    # gets stored in conversation history, not just printed. Force the
+    # correct encoding before iterating.
+    resp.encoding = "utf-8"
 
     full_reply = []
     for raw_line in resp.iter_lines(decode_unicode=True):
