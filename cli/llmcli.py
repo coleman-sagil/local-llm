@@ -373,4 +373,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # Catches Ctrl+C at any point, including mid-stream while waiting on
+        # a token from a slow CPU-only generation - not just at the input()
+        # prompt (which the REPL loops already handle on their own).
+        print("\nInterrupted. Goodbye.")
+        sys.exit(0)
