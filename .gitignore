@@ -1,0 +1,7 @@
+*.log
+run/
+models/
+llama.cpp/
+__pycache__/
+*.pyc
+.venv/
