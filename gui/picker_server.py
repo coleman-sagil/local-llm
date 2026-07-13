@@ -30,7 +30,7 @@ ROOT_DIR = GUI_DIR.parent
 PICKER_HTML = GUI_DIR / "picker.html"
 LAUNCH_SCRIPT = GUI_DIR / "launch.sh"
 
-VALID_MODELS = {"scout": 8090, "qwen": 8091}
+VALID_MODELS = {"scout": 8090, "qwen": 8091, "qwen-next": 8092}
 
 DEFAULT_PORT = 8089
 

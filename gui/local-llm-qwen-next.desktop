@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Local LLM: Qwen3-Next (General)
+GenericName=Local Chat - Qwen3-Next-80B-A3B-Instruct
+Comment=Chat with locally-served Qwen3-Next-80B-A3B-Instruct via llama.cpp (CPU-only, app-mode browser window)
+Exec=/home/mateo/local-llm/gui/launch.sh qwen-next
+Icon=web-browser
+Terminal=false
+Categories=Development;
+StartupNotify=true

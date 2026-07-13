@@ -29,4 +29,8 @@ download \
   "https://huggingface.co/unsloth/Qwen3-Coder-Next-GGUF/resolve/main/Qwen3-Coder-Next-UD-Q4_K_M.gguf" \
   "$BASE/qwen3-coder-next/Qwen3-Coder-Next-UD-Q4_K_M.gguf"
 
+download \
+  "https://huggingface.co/unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF/resolve/main/Qwen3-Next-80B-A3B-Instruct-UD-Q4_K_XL.gguf" \
+  "$BASE/qwen3-next-instruct/Qwen3-Next-80B-A3B-Instruct-UD-Q4_K_XL.gguf"
+
 echo "ALL DOWNLOADS COMPLETE"

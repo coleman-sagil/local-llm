@@ -15,8 +15,10 @@ Usage:
     python3 llmcli.py --model qwen --tools
 
 Fixed port contract (do not change without updating bin/start-model.sh too):
-    scout -> http://127.0.0.1:8090
-    qwen  -> http://127.0.0.1:8091
+    scout      -> http://127.0.0.1:8090   (Llama-4-Scout, general-purpose)
+    qwen       -> http://127.0.0.1:8091   (Qwen3-Coder-Next, coding specialist)
+    qwen-next  -> http://127.0.0.1:8092   (Qwen3-Next-80B-A3B-Instruct, general-purpose
+                                            sibling of qwen - same architecture/backbone)
 """
 
 import argparse
@@ -29,6 +31,7 @@ import requests
 MODEL_PORTS = {
     "scout": 8090,
     "qwen": 8091,
+    "qwen-next": 8092,
 }
 
 REQUEST_TIMEOUT_CONNECT = 5  # seconds, just for the initial reachability probe

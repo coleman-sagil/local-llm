@@ -152,6 +152,17 @@
     </div>
   </div>
 
+  <div class="card">
+    <h2>General: Qwen3-Next-80B-A3B-Instruct</h2>
+    <p class="desc">Same architecture as Qwen3-Coder-Next above, general-purpose instead of coding-tuned &middot; port 8092</p>
+    <button class="launch" data-model="qwen-next">Launch Qwen3-Next</button>
+    <div class="status" id="status-qwen-next"></div>
+    <div class="fallback">
+      If the button doesn't work (server not running), run this from the project root instead:
+      <pre class="cmd">./gui/launch.sh qwen-next</pre>
+    </div>
+  </div>
+
   <footer>
     Buttons POST to a local <code>picker_server.py</code> backend (if it's running) which shells out to
     <code>gui/launch.sh &lt;model&gt;</code>. That script starts the model CPU-only via

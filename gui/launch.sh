@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gui/launch.sh <scout|qwen>
+# gui/launch.sh <scout|qwen|qwen-next>
 #
 # "Desktop app" launcher for one model's built-in llama-server chat webui:
 #   1. Ensures the model's llama-server is up, via bin/start-model.sh
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <scout|qwen>" >&2
+  echo "Usage: $0 <scout|qwen|qwen-next>" >&2
   exit 1
 }
 
@@ -22,10 +22,11 @@ MODEL="${1:-}"
 [[ -n "$MODEL" ]] || usage
 
 case "$MODEL" in
-  scout) PORT=8090 ;;
-  qwen)  PORT=8091 ;;
+  scout)     PORT=8090 ;;
+  qwen)      PORT=8091 ;;
+  qwen-next) PORT=8092 ;;
   *)
-    echo "Error: unknown model '$MODEL'. Must be 'scout' or 'qwen'." >&2
+    echo "Error: unknown model '$MODEL'. Must be 'scout', 'qwen', or 'qwen-next'." >&2
     exit 1
     ;;
 esac

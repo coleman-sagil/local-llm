@@ -14,9 +14,14 @@ becomes a live HTTP server, and everything else is a client of that server.**
 
 Concretely, there are three layers:
 
-1. **The models.** Two GGUF files (`llama-4-scout` and `qwen3-coder-next`)
-   sitting in `models/`. A GGUF file is just weights plus metadata, it does
-   nothing by itself.
+1. **The models.** Three GGUF files (`llama-4-scout`, `qwen3-coder-next`, and
+   `qwen3-next-instruct`) sitting in `models/`. A GGUF file is just weights
+   plus metadata, it does nothing by itself. `qwen3-coder-next` and
+   `qwen3-next-instruct` are actually the same underlying architecture
+   (Alibaba's "Qwen3-Next" 80B-total/~3B-active hybrid-attention MoE
+   backbone) - one fine-tuned for code, one instruct-tuned generally - which
+   is why they share the same offload recipe and land in the same speed
+   ballpark on this hardware.
 2. **The inference engine.** `llama-server` (from the `llama.cpp` project,
    built from source in `llama.cpp/`) loads a GGUF file into memory and
    exposes it as an HTTP API on a fixed port, one server process per model.
@@ -30,8 +35,8 @@ Concretely, there are three layers:
    independent, interchangeable clients of that same API. Neither one knows
    or cares that the other exists. They don't share code with each other;
    they share a *contract*: a model name maps to a fixed port
-   (`scout` -> 8090, `qwen` -> 8091, and the GUI's own picker page ->
-   8089), and the way to talk to a running model is always
+   (`scout` -> 8090, `qwen` -> 8091, `qwen-next` -> 8092, and the GUI's own
+   picker page -> 8089), and the way to talk to a running model is always
    `POST http://127.0.0.1:<port>/v1/chat/completions`.
 
 Once that shape is in your head, any new front end you add later (a phone
@@ -90,10 +95,12 @@ you're re-downloading a model, use the `.sh` one.
 The everyday commands, run from the repo root:
 
 ```bash
-bin/start-model.sh scout --cpu-only     # start Scout, CPU-only
-bin/start-model.sh qwen  --cpu-only     # start Qwen, CPU-only
-bin/stop-model.sh  scout                # stop whichever one you started
+bin/start-model.sh scout     --cpu-only     # start Scout, CPU-only
+bin/start-model.sh qwen      --cpu-only     # start Qwen (coder), CPU-only
+bin/start-model.sh qwen-next --cpu-only     # start Qwen3-Next (general), CPU-only
+bin/stop-model.sh  scout                    # stop whichever one you started
 bin/stop-model.sh  qwen
+bin/stop-model.sh  qwen-next
 ```
 
 `start-model.sh` backgrounds `llama-server`, writes its output to
@@ -116,17 +123,19 @@ There are two genuinely different ways to run a model, controlled by
 `--cpu-only`:
 
 **`--cpu-only`** runs entirely on CPU (`-ngl 0`, meaning "offload zero layers
-to GPU"), with a 4096-token context for either model. This is slow (CPU
-token generation is on the order of one token per several seconds for these
-model sizes) but it never touches the GPU at all, so it's safe to run any
-time, including while mining is active. This is the mode the CLI and GUI use
-by default, and it's the mode you should use for your own casual testing of
-this setup.
+to GPU"), with a 4096-token context for any of the three models. This is slow
+(CPU token generation is on the order of one token per several seconds for
+Scout and Qwen3-Next, and considerably worse for Qwen3-Coder-Next
+specifically - its 512-expert routing is expensive to do from CPU RAM,
+sometimes dropping under 1 token/sec) but it never touches the GPU at all,
+so it's safe to run any time, including while mining is active. This is the
+mode the CLI and GUI use by default, and it's the mode you should use for
+your own casual testing of this setup.
 
 **Without `--cpu-only`** (GPU offload) is the real, intended fast path:
 `-ngl 999 --cpu-moe` (explained in detail in section 6), with a 2048-token
-context for Scout and 4096 for Qwen. This is where the mining interaction
-matters, covered next.
+context for Scout and 4096 for both Qwen variants. This is where the mining
+interaction matters, covered next.
 
 ### The mining interaction
 
@@ -169,7 +178,8 @@ doesn't stop it, doesn't touch systemd at all, which is exactly why it's the
 
 ```bash
 python3 cli/llmcli.py --model scout
-python3 cli/llmcli.py --model qwen
+python3 cli/llmcli.py --model qwen        # coding specialist
+python3 cli/llmcli.py --model qwen-next   # general-purpose sibling of qwen
 ```
 
 This assumes the corresponding server is already running (via
@@ -232,7 +242,8 @@ into it, because they're genuinely different in what they require:
 **The picker page** (`gui/launch-picker.sh`) is the real front door. It
 starts a tiny local backend, `gui/picker_server.py`, listening on port 8089
 (stdlib-only Python, no dependencies), which serves `gui/picker.html`, a
-two-button page ("Launch Scout" / "Launch Qwen"). Clicking a button `POST`s
+three-button page ("Launch Qwen" / "Launch Scout" / "Launch Qwen3-Next").
+Clicking a button `POST`s
 to `/launch/<model>` on that backend, which shells out to `gui/launch.sh
 <model>` in the background and returns immediately (it doesn't wait for the
 model to finish loading, since that can take a while on CPU). This is
@@ -246,10 +257,11 @@ access-denied), so the visual layout is unconfirmed. The HTML/CSS is
 straightforward and there's no reason to expect it looks broken, but the
 honest status is "should work, never actually seen rendered."
 
-**Direct per-model launch** (`gui/launch.sh <scout|qwen>`) is what the picker
-button calls, and you can also call it yourself directly, or via the two
-`.desktop` files (`gui/local-llm-scout.desktop`,
-`gui/local-llm-qwen.desktop`). It checks whether the model's server is
+**Direct per-model launch** (`gui/launch.sh <scout|qwen|qwen-next>`) is what
+the picker button calls, and you can also call it yourself directly, or via
+the three `.desktop` files (`gui/local-llm-scout.desktop`,
+`gui/local-llm-qwen.desktop`, `gui/local-llm-qwen-next.desktop`). It checks
+whether the model's server is
 already up (a quick `/health` check, so it doesn't trip over
 `start-model.sh`'s "already running" guard), starts it CPU-only via
 `bin/start-model.sh <model> --cpu-only` if not, then opens the model's own
@@ -284,7 +296,7 @@ whether the chat window looks right.
 This is the part that makes the launch scripts' flags legible instead of
 cargo-culted.
 
-Both models are Mixture-of-Experts (MoE) architectures. A dense model
+All three models are Mixture-of-Experts (MoE) architectures. A dense model
 uses every one of its weights on every single token it processes. An MoE
 model instead has a large bank of "expert" feed-forward sub-networks, and a
 small routing mechanism that picks only a handful of them to actually run
@@ -293,8 +305,9 @@ only the attention layers and a small "always-active" routing/shared portion
 run on literally everything.
 
 That distinction is exactly what makes an 8GB GPU usable here at all. Scout's
-two GGUF parts total about 65GB, and Qwen's single file is about 49GB;
-neither remotely fits in 8GB of VRAM as a whole. But because most of an MoE
+two GGUF parts total about 65GB, Qwen3-Coder-Next's single file is about
+49GB, and Qwen3-Next-Instruct's single file is about 43GB; none of them
+remotely fit in 8GB of VRAM as a whole. But because most of an MoE
 model's bulk is those sparsely-used expert weights, you don't actually need
 all of them sitting in fast VRAM to get most of the speed benefit. `-ngl
 999` tells `llama-server` "offload as many transformer layers to GPU as the
@@ -314,13 +327,15 @@ why it never touches VRAM at all and can safely coexist with mining.
 
 The context-length numbers matter for the same VRAM-budget reason: the
 context window determines the size of the KV cache, which is additional
-memory that has to sit alongside the model's GPU-resident weights. Both
-models use a 4096 context in CPU-only mode, where there's no VRAM budget to
-protect. In GPU mode, Scout's context is trimmed to 2048 specifically to
-leave more VRAM headroom for its GPU-resident weights, while Qwen stays at
-4096 in GPU mode too. Same mechanism (context size trades off against
-VRAM for weights), just applied more conservatively for Scout than for
-Qwen in this configuration.
+memory that has to sit alongside the model's GPU-resident weights. All
+three models use a 4096 context in CPU-only mode, where there's no VRAM
+budget to protect. In GPU mode, Scout's context is trimmed to 2048
+specifically to leave more VRAM headroom for its larger (17B active
+parameter) attention layers, while both Qwen variants stay at 4096 in GPU
+mode too, since their much smaller (~3B active parameter) attention/shared
+layers leave more headroom to begin with. Same mechanism (context size
+trades off against VRAM for weights), just applied more conservatively for
+Scout than for either Qwen model in this configuration.
 
 One more small design detail worth understanding while you're in this
 territory: `start-model.sh` doesn't just fire off `llama-server` and assume
@@ -385,3 +400,21 @@ testing, and the fix was simply switching the test to hit
 forward is simple: always talk to a running model through
 `/v1/chat/completions`, never `/completion`, and this class of problem
 doesn't come up.
+
+### Mojibake (corrupted emoji/accents) in the CLI's streamed output
+
+This one actually shipped briefly and was caught after the fact: `cli/llmcli.py`'s
+core streaming path used to garble any non-ASCII character (emoji, accented
+letters, curly quotes) into corrupted-looking bytes, and the corruption
+polluted in-memory conversation history, not just what was printed to the
+terminal. Root cause: `llama-server`'s streaming response has `Content-Type:
+text/event-stream` with no `charset` parameter, so Python's `requests`
+library falls back to guessing `ISO-8859-1` for the response encoding, and
+`resp.iter_lines(decode_unicode=True)` decodes using that wrong guess,
+mangling every multi-byte UTF-8 sequence. The fix (already applied in
+`stream_chat()`) is one line: explicitly set `resp.encoding = "utf-8"` right
+after the request, before iterating. Confirmed fixed with a forced
+round-trip test (asking a model to echo back `Café naïve 🌟 résumé` and
+verifying the captured bytes decode as valid, correct UTF-8). If you ever
+see garbled non-ASCII text out of the CLI again, this line is the first
+place to check.
