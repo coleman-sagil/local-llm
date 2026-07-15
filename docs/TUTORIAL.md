@@ -247,15 +247,15 @@ Clicking a button `POST`s
 to `/launch/<model>` on that backend, which shells out to `gui/launch.sh
 <model>` in the background and returns immediately (it doesn't wait for the
 model to finish loading, since that can take a while on CPU). This is
-functionally verified this session: the POST endpoint was confirmed to
-correctly launch `launch.sh` as a detached background process. What's *not*
-verified is what the page actually looks like rendered in a browser: this
-sandbox had no working screenshot tool available (none of
-gnome-screenshot/scrot/import/maim/flameshot/spectacle were installed, `xwd`
-failed with X errors, and GNOME's own D-Bus screenshot method returned
-access-denied), so the visual layout is unconfirmed. The HTML/CSS is
-straightforward and there's no reason to expect it looks broken, but the
-honest status is "should work, never actually seen rendered."
+functionally verified: the POST endpoint was confirmed to correctly launch
+`launch.sh` as a detached background process, including against the live
+qwen-next server (already-running detection skipped the restart, PID
+unchanged). The rendering was also visually confirmed on 2026-07-15: no
+gnome-screenshot/scrot/import/maim/flameshot on this machine, but Python's
+`mss` (already installed, no sudo needed) grabbed the full virtual display
+and a crop of the app-mode Chrome window shows the picker page rendering
+correctly, dark theme included, screenshot at
+`docs/screenshots/picker-verified-2026-07-15.png`.
 
 **Direct per-model launch** (`gui/launch.sh <scout|qwen|qwen-next>`) is what
 the picker button calls, and you can also call it yourself directly, or via
@@ -268,12 +268,15 @@ already up (a quick `/health` check, so it doesn't trip over
 built-in llama.cpp chat webui in an app-mode browser window (no tabs, no
 address bar, so it reads as a standalone app rather than a browser tab). It
 tries `google-chrome`, then `chromium`, then `chromium-browser`, then
-`firefox`, in that order, and fails clearly if none are installed. Note that
-the `.desktop` files are **not currently installed** into
-`~/.local/share/applications`, so double-clicking an app-launcher icon
-doesn't work yet out of the box; you'd need to copy them there yourself
-(`cp gui/local-llm-*.desktop ~/.local/share/applications/`) if you want that.
-Also note this GUI layer only ever launches CPU-only; GPU-offload mode
+`firefox`, in that order, and fails clearly if none are installed. The
+three `.desktop` files were installed into `~/.local/share/applications` on
+this machine on 2026-07-15 (all three validate cleanly under
+`desktop-file-validate`, and `Icon=web-browser` resolves fine against the
+Pop icon theme), so double-clicking an app-launcher icon works here now. A
+fresh checkout on another machine still needs the manual step:
+`cp gui/local-llm-*.desktop ~/.local/share/applications/` followed by
+`update-desktop-database ~/.local/share/applications/` if that command
+exists. Also note this GUI layer only ever launches CPU-only; GPU-offload mode
 (with its mining interaction) is something you invoke directly via
 `bin/start-model.sh <model>` yourself, on purpose, not through the GUI.
 
