@@ -321,6 +321,7 @@ def run_tools_repl(model: str) -> None:
             print("(conversation cleared)")
             continue
 
+        turn_start = len(messages)  # so a mid-turn failure can roll back cleanly
         messages.append({"role": "user", "content": user_input})
 
         try:
@@ -361,7 +362,12 @@ def run_tools_repl(model: str) -> None:
         except requests.exceptions.RequestException as exc:
             print(f"\nError talking to {model} server: {exc}", file=sys.stderr)
             print(unreachable_message(model, base_url), file=sys.stderr)
-            messages.pop()  # drop the dangling user turn
+            # Drop the whole dangling turn, not just the last message: a
+            # failure on round 2+ happens after the user turn already grew
+            # to include an assistant tool_calls message and one or more
+            # tool results, and messages.pop() only undid the last of those,
+            # leaving orphaned tool_call_ids in history for the next turn.
+            del messages[turn_start:]
             continue
 
 
