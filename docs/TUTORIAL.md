@@ -201,38 +201,116 @@ Under the hood this is exactly the shape described in section 1: it POSTs to
 `/v1/chat/completions` with `"stream": true`, reads the response as
 server-sent events, and prints each chunk's text as it arrives.
 
-### The `--tools` layer: honest status
+### The `--tools` layer: a real MCP client, honest status
 
 ```bash
 python3 cli/llmcli.py --model qwen --tools
 ```
 
-This is an experimental, opt-in layer bolted onto the side of the CLI, kept
-deliberately separate from the core chat path (it's non-streaming, and it's
-clearly commented in the source as best-effort). It wires up two tools,
-`read_file(path)` and `run_shell(command)`, using the standard OpenAI
-`tools`/`tool_calls` function-calling format, and **every single tool call
-requires a manual y/n confirmation before it executes**, with no
-auto-execute path at all. That confirmation gate is not a placeholder; it's
-the actual safety boundary, since these tools can read arbitrary files or run
-arbitrary shell commands unsandboxed on your real machine.
+This is still an experimental, opt-in layer bolted onto the side of the CLI,
+kept deliberately separate from the core chat path (non-streaming, clearly
+commented in the source as best-effort). What changed: it used to wire up
+exactly two hardcoded tools (`read_file`, `run_shell`); it now runs a real
+[MCP](https://modelcontextprotocol.io/) client. On startup it reads
+`cli/mcp_servers.json`, connects (stdio transport, via the Python `mcp` SDK)
+to every server listed there with `"enabled": true`, calls `list_tools()` on
+each, and merges the results into the single tool schema sent to the model.
 
-What's verified and what isn't, plainly: the wire format is correct (a raw
-API call confirmed the request is well-formed and the tool schemas are sent
-correctly), and the safety fallback is verified (when a model responds with
-plain text instead of a structured tool call, the CLI correctly treats it as
-a normal reply and never fires the confirm/execute path). What is **not**
-verified is the actual happy path, model emits a real structured tool call,
-you approve it, the tool runs, the result feeds back into the conversation.
-Neither model available in this setup reliably produced a structured
-`tool_calls` response under CPU-only quantized inference during testing;
-Scout emitted plain-text pseudo-syntax instead of a real tool call, and
-Qwen3-Coder-Next (which is the more tool-use-tuned of the two) ran at well
-under one token per second CPU-only, too slow to wait out a live test. So
-treat `--tools` as a demonstration of the mechanism and the safety gate, not
-as something to rely on yet. If you want to actually push on this later, it
-would be worth trying `--tools` with Qwen in GPU-offload mode, where it will
-run fast enough to actually observe several rounds of tool-calling behavior.
+**Where the tools come from.** Two sources: a tiny always-on `builtin`
+source (just `run_shell` — no configured MCP server does arbitrary shell
+execution, so that one stays a hardcoded local tool), and whatever MCP
+servers are enabled in `mcp_servers.json`. The old hardcoded `read_file` is
+gone entirely — the `filesystem` MCP server's own `read_file` (plus
+`read_text_file`, `write_file`, `search_files`, `directory_tree`, and nine
+more) replace it, sandboxed to whatever root that server is configured with.
+Every tool the model sees is namespaced `{source}__{original_name}` — e.g.
+`builtin__run_shell`, `filesystem__read_file`, `playwright__browser_navigate`
+— which is load-bearing, not cosmetic: the filesystem server itself exposes
+a tool literally named `read_file`, and it would silently collide with the
+old hardcoded one if both were ever un-namespaced at once.
+
+**What's configured by default**, per an explicit standing decision to make
+this broad rather than narrowly scoped, with the y/n confirmation gate doing
+the actual safety work instead of a locked-down allowlist:
+
+- `filesystem` — [`@modelcontextprotocol/server-filesystem`](https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem),
+  rooted at `/home/mateo` (broad on purpose — this also covers the synced
+  Kearney & O'Banion Dropbox folder for free, no separate Dropbox
+  integration needed).
+- `playwright` — [`@playwright/mcp`](https://www.npmjs.com/package/@playwright/mcp)
+  (Microsoft's official server; the older `@modelcontextprotocol/server-puppeteer`
+  is dead/deprecated — don't reach for it), headless, unrestricted, not
+  locked to any site.
+- `google-drive` — present but `"enabled": false`, a scaffold only until
+  OAuth credentials exist. See `docs/GOOGLE_SETUP.md`.
+
+Both `filesystem` and `playwright` need a modern Node (the servers use
+ES2022 top-level await; system Node on this machine is v12 from apt, EOL,
+and dies with `SyntaxError: Unexpected reserved word`). A standalone Node 22
+LTS lives at `.tools/node22/` (downloaded without sudo, gitignored, tied to
+this machine rather than to any particular git checkout) — `mcp_servers.json`
+invokes it directly by absolute path rather than trusting a bare `npx` on
+`PATH` to resolve correctly; see the comments in `cli/llmcli.py` above
+`load_mcp_server_configs()` and in `cli/mcp_smoke_test.py` for the full
+story of why that distinction matters.
+
+**Unreachable servers don't take the CLI down with them.** Each server gets
+a bounded connect attempt; if it fails to start, fails to authenticate, or
+just doesn't respond in time, `llmcli.py` prints one warning line naming it
+and moves on — the remaining servers (and the always-on `builtin` tool) are
+still usable. This is what lets `google-drive` sit in the config disabled,
+and what will let it fail gracefully the day it's flipped on before its
+first-run OAuth is actually done.
+
+**The safety gate itself did not change.** Every tool call, from every
+source, still requires a manual y/n confirmation before it executes, with no
+auto-execute path — MCP-routed calls go through exactly the same `confirm()`
+prompt as the old hardcoded tools did. That gate is the real safety
+boundary, not a formality, since the filesystem server can read/write
+anything under its root and the playwright server drives a real, unsandboxed
+browser.
+
+**An honest limitation found while wiring this up, not a bug in the code —
+a fact about these models:** the *merged tool schema itself* can be bigger
+than these models' context windows. `playwright` alone exposes ~24 tools and
+its schema is already an estimated ~4,400 tokens; combined with
+`filesystem`'s ~14 tools the merged schema measured **~6,637 prompt tokens**
+against the live `qwen-next` server (confirmed directly: `request (6637
+tokens) exceeds the available context size (4096 tokens)`) — over budget
+before a single word of conversation, on every model this project currently
+runs (`scout` at 2048 ctx, `qwen`/`qwen-next` at 4096 ctx; see `GPU_CTX`/
+`CTX` in `bin/start-model.sh`). `llmcli.py` now queries the connected
+server's real context size (`/slots`) at startup and prints a warning if the
+merged schema looks too big for it, so this shows up as a clear heads-up
+line instead of a confusing mid-conversation `exceeds context size` error.
+If you hit that, disable one server in `cli/mcp_servers.json` (`playwright`
+is the bigger single contributor) rather than running both against a
+small-context model, or raise `GPU_CTX`/`CTX` in `bin/start-model.sh` if you
+have the VRAM/RAM to spare.
+
+**What's verified and what isn't, plainly.** Verified end-to-end with real
+MCP servers (no LLM involved, so it isn't blocked by slow generation):
+config loading, connecting to `filesystem` and `playwright` and merging
+their 39 combined tools into one correctly-namespaced schema, graceful
+skip-with-warning of an unreachable server without taking down the others,
+the y/n confirm gate (both the deny path and the allow path actually
+executing a real MCP tool call), and — the specific scenario a recent fix
+(`52ea885`) targeted — that a tool-call failure on round 2+ of a turn rolls
+the conversation history back cleanly with no orphaned `tool_call_id`
+entries left for the next turn. Also verified: zero orphaned subprocesses
+after both a clean `/exit` and a mid-session Ctrl+C (the previous concern
+here — models not reliably producing structured `tool_calls` under CPU-only
+quantized inference — is unchanged and still applies; that's a model/sampler
+question, not something this refactor touches). What's **not** verified
+right now: a live model actually seeing the merged 39-tool schema and
+emitting a real `tool_calls` response against it. The only model server
+reachable while this was built was `qwen-next` on port 8092, which was
+running at a fraction of its normal speed (an unrelated stuck process the
+user was clearing separately) — at ~4 tokens/sec *prompt processing*, even
+the smallest reasonable schema would take several minutes just to ingest,
+before generating a single token. Once that's resolved (or in GPU-offload
+mode generally), it's worth an actual live `--tools` session to watch a real
+multi-round tool-calling exchange happen.
 
 ## 5. Using the GUI day to day
 
