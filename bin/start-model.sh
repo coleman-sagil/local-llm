@@ -83,11 +83,20 @@ if [[ -f "$PID_FILE" ]]; then
   rm -f "$PID_FILE"
 fi
 
+# Leave one core free rather than defaulting to nproc threads: llama.cpp's CPU
+# backend rendezvous-barriers all worker threads at every compute-graph step,
+# so if an unrelated process (e.g. a stuck root daemon) pins even one core,
+# every thread stalls waiting on the one that can't get scheduled -- a single
+# busy neighbor process was measured to cause a ~29x generation-speed
+# collapse (26.5 -> 0.9 tok/s) on this 6-core/no-SMT machine. One idle core
+# of headroom is cheap insurance against that failure class.
+THREADS="$(( $(nproc) > 1 ? $(nproc) - 1 : 1 ))"
+
 if [[ "$CPU_ONLY" -eq 1 ]]; then
-  EXTRA_ARGS=(-ngl 0)
+  EXTRA_ARGS=(-ngl 0 --threads "$THREADS")
   CTX=4096
 else
-  EXTRA_ARGS=(-ngl 999 --cpu-moe)
+  EXTRA_ARGS=(-ngl 999 --cpu-moe --threads "$THREADS")
   CTX="$GPU_CTX"
 
   if systemctl is-active --quiet nicehash-miner.service; then
