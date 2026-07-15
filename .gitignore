@@ -8,3 +8,4 @@ __pycache__/
 .venv/
 .tools/
 cli/google_credentials.json
+.playwright-mcp/
