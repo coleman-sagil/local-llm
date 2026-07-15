@@ -6,3 +6,5 @@ llama.cpp/
 __pycache__/
 *.pyc
 .venv/
+.tools/
+cli/google_credentials.json

@@ -1,0 +1,21 @@
+{
+  "servers": {
+    "google-drive": {
+      "enabled": false,
+      "disabledReason": "No Google OAuth credentials yet. This entry is a scaffold only - see setupDoc for the one-time setup (creates a NEW Google Cloud project, separate from any K&S business project) that the user must do interactively (it requires their own Google login). Once cli/google_credentials.json exists and first-run auth has been completed, flip this to true.",
+      "description": "Google Drive + Docs + Sheets + Slides + Calendar, via @piotr-agier/google-drive-mcp (npx-launched Node MCP server, stdio transport). Same y/n-per-call confirmation model as read_file/run_shell in llmcli.py --tools - broad capability, not blind autonomy.",
+      "command": "npx",
+      "args": ["-y", "@piotr-agier/google-drive-mcp"],
+      "env": {
+        "GOOGLE_DRIVE_OAUTH_CREDENTIALS": "/home/mateo/local-llm/cli/google_credentials.json"
+      },
+      "credentialsPath": "/home/mateo/local-llm/cli/google_credentials.json",
+      "setupDoc": "docs/GOOGLE_SETUP.md",
+      "firstRunAuthCommand": "npx -y @piotr-agier/google-drive-mcp auth",
+      "notes": [
+        "System Node (/usr/bin/node) on this machine is v12 (EOL, apt) and cannot run this server - it uses ES2022 top-level await and dies with 'SyntaxError: Unexpected reserved word'. A modern Node 22 LTS is already downloaded standalone (no sudo) to /home/mateo/local-llm/.tools/node22/. Whatever launches this 'npx' command (this client, or the user running the auth command by hand) needs that node22/bin ahead of system node on PATH. See cli/mcp_smoke_test.py for the exact, already-proven-working invocation pattern (it hardcodes the node22 paths and explains why 'env node' re-resolution defeats a naive fix) - reuse that pattern here rather than re-deriving it.",
+        "The token cache (tokens.json) is left at the server's own default (~/.config/google-drive-mcp/tokens.json), outside this repo - only the OAuth client credentials file lives at credentialsPath above, and only that path needs to be gitignored."
+      ]
+    }
+  }
+}
