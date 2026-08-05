@@ -15,7 +15,8 @@
       ]
     },
     "playwright": {
-      "enabled": true,
+      "enabled": false,
+      "disabledReason": "Verified 2026-07-15: filesystem (14 tools) + playwright (24 tools) together produce a ~6735-token merged schema, which exceeds every model's current context window (2048-4096 tokens, see GPU_CTX/CTX in bin/start-model.sh) - a fresh --tools session with both enabled fails on the first message with 'exceeds context size'. filesystem alone is ~2.4k tokens and fits comfortably. To re-enable browsing: flip this to true AND raise GPU_CTX/CTX for whichever model you're using in bin/start-model.sh (roughly 8192+ recommended to leave room for real conversation on top of the schema) - test the new context size doesn't OOM the 8GB card before relying on it.",
       "description": "Unrestricted headless browser automation (navigate, click, type, screenshot, evaluate JS, etc.) - per the user's explicit broad-access choice, not locked to specific sites. Via @playwright/mcp (Microsoft's official Playwright MCP server - @modelcontextprotocol/server-puppeteer is dead/deprecated, do not use it). --isolated keeps the browser profile in-memory only (no persistent user-data-dir). --executable-path points at the system's installed google-chrome so this server doesn't try to download its own Chromium. Same y/n-per-call confirmation model as every other tool in llmcli.py --tools.",
       "command": "/home/mateo/local-llm/.tools/node22/bin/node",
       "args": [
