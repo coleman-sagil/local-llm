@@ -3,80 +3,250 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Local LLM Picker</title>
+<title>Local LLM</title>
 <style>
   :root {
     color-scheme: light dark;
     --bg: #f5f5f7;
+    --bg-hero: #eef1fa;
     --card-bg: #ffffff;
     --text: #1b1b1f;
     --muted: #6b6b76;
     --border: #dcdce2;
     --accent: #2f6fed;
+    --accent-hover: #2559c7;
     --accent-text: #ffffff;
+    --accent-soft: #e8effe;
     --code-bg: #eef0f5;
+    --pill-bg: #ffffff;
+    --pill-border: #dcdce2;
     --ok: #1f8a4c;
     --err: #c0392b;
+    --link: #2f6fed;
+    --shadow: 0 1px 2px rgba(20, 20, 30, 0.04), 0 8px 20px -12px rgba(20, 20, 30, 0.12);
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #1a1a1e;
+      --bg-hero: #17171d;
       --card-bg: #232327;
       --text: #ececf1;
       --muted: #9a9aa3;
       --border: #38383f;
       --accent: #5b8dff;
+      --accent-hover: #7ba3ff;
       --accent-text: #0d1117;
+      --accent-soft: #202a41;
       --code-bg: #17171a;
+      --pill-bg: #1e1e23;
+      --pill-border: #38383f;
       --ok: #3fbf72;
       --err: #ff6b5e;
+      --link: #7ba3ff;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
     }
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     margin: 0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    padding: 2rem 1rem;
+    line-height: 1.5;
   }
+  a { color: var(--link); }
   .wrap {
     width: 100%;
-    max-width: 560px;
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 0 1.25rem 3rem;
   }
-  h1 {
-    font-size: 1.4rem;
-    margin: 0 0 0.25rem;
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
-  .sub {
+
+  /* ---------- Hero ---------- */
+  .hero {
+    background: linear-gradient(180deg, var(--bg-hero), var(--bg) 85%);
+    border-bottom: 1px solid var(--border);
+    padding: 3rem 1.25rem 2.5rem;
+    text-align: center;
+  }
+  .hero-inner {
+    max-width: 880px;
+    margin: 0 auto;
+  }
+  .eyebrow {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--pill-border);
+    border-radius: 999px;
+    padding: 0.3rem 0.8rem;
+    margin-bottom: 1rem;
+  }
+  h1.title {
+    font-size: 2.5rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.6rem;
+  }
+  p.tagline {
     color: var(--muted);
-    margin: 0 0 1.75rem;
-    font-size: 0.92rem;
+    font-size: 1.08rem;
+    max-width: 620px;
+    margin: 0 auto 1.5rem;
+  }
+  .badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1.75rem;
+  }
+  .pill {
+    font-size: 0.78rem;
+    color: var(--muted);
+    background: var(--pill-bg);
+    border: 1px solid var(--pill-border);
+    border-radius: 999px;
+    padding: 0.32rem 0.75rem;
+    white-space: nowrap;
+  }
+  .cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-decoration: none;
+    border-radius: 10px;
+    padding: 0.72rem 1.4rem;
+    border: 1px solid transparent;
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-secondary {
+    background: var(--card-bg);
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--accent); }
+  .btn svg { width: 1.05em; height: 1.05em; flex: none; }
+
+  /* ---------- Generic section chrome ---------- */
+  section.block {
+    padding: 3rem 0 0;
+  }
+  section.block:first-of-type { padding-top: 2.5rem; }
+  h2.section-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.35rem;
+  }
+  p.section-sub {
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin: 0 0 1.5rem;
+    max-width: 640px;
+  }
+
+  /* ---------- How it fits together strip ---------- */
+  .flow {
+    display: flex;
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .flow-step {
+    flex: 1 1 200px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+  }
+  .flow-step .k {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.3rem;
+  }
+  .flow-step .v { font-weight: 600; margin-bottom: 0.2rem; }
+  .flow-step .d { color: var(--muted); font-size: 0.84rem; }
+  .flow-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 1.3rem;
+    flex: 0 0 auto;
+    padding: 0 0.1rem;
+  }
+  @media (max-width: 700px) {
+    .flow { flex-direction: column; }
+    .flow-arrow { transform: rotate(90deg); padding: 0.1rem 0; }
+  }
+
+  /* ---------- Model cards ---------- */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem;
   }
   .card {
     background: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 1.25rem;
-    margin-bottom: 1rem;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
   }
-  .card h2 {
+  .card .tag {
+    align-self: flex-start;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 6px;
+    padding: 0.15rem 0.5rem;
+    margin-bottom: 0.6rem;
+  }
+  .card h3 {
     margin: 0 0 0.15rem;
     font-size: 1.05rem;
   }
   .card p.desc {
     margin: 0 0 0.9rem;
     color: var(--muted);
-    font-size: 0.88rem;
+    font-size: 0.86rem;
+    flex: 1;
   }
   button.launch {
     width: 100%;
     padding: 0.7rem 1rem;
-    font-size: 0.98rem;
+    font-size: 0.96rem;
     font-weight: 600;
     border: none;
     border-radius: 9px;
@@ -84,15 +254,13 @@
     color: var(--accent-text);
     cursor: pointer;
   }
+  button.launch:hover { background: var(--accent-hover); }
   button.launch:active { transform: translateY(1px); }
   button.launch:disabled { opacity: 0.6; cursor: default; }
   .fallback {
     margin-top: 0.75rem;
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     color: var(--muted);
-  }
-  code, pre {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
   pre.cmd {
     background: var(--code-bg);
@@ -100,76 +268,370 @@
     border-radius: 8px;
     padding: 0.55rem 0.7rem;
     margin: 0.4rem 0 0;
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     overflow-x: auto;
     white-space: pre;
   }
   .status {
     margin-top: 0.7rem;
-    font-size: 0.85rem;
+    font-size: 0.83rem;
     min-height: 1.1em;
   }
   .status.ok { color: var(--ok); }
   .status.err { color: var(--err); }
   .status.pending { color: var(--muted); }
-  footer {
-    color: var(--muted);
-    font-size: 0.78rem;
-    margin-top: 1.5rem;
-    line-height: 1.5;
+
+  /* ---------- Install ---------- */
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
   }
-  footer code {
+  .step {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+  }
+  .step .step-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.45rem;
+  }
+  .step .num {
+    flex: none;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .step .step-title { font-weight: 700; font-size: 0.98rem; }
+  .step p { margin: 0.3rem 0 0.5rem; color: var(--muted); font-size: 0.86rem; }
+  .step pre.cmd { margin-top: 0.35rem; }
+
+  /* ---------- GGUF table ---------- */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
+  table.gguf {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+    background: var(--card-bg);
+  }
+  table.gguf th, table.gguf td {
+    text-align: left;
+    padding: 0.65rem 0.85rem;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  table.gguf th {
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
     background: var(--code-bg);
-    border-radius: 4px;
-    padding: 0.05rem 0.3rem;
+  }
+  table.gguf tr:last-child td { border-bottom: none; }
+  table.gguf td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.82rem; }
+
+  .gguf-cmds {
+    margin-top: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+  .gguf-cmd-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+  }
+  .gguf-cmd-card h4 {
+    margin: 0 0 0.3rem;
+    font-size: 0.92rem;
+  }
+  .gguf-cmd-card .meta { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.5rem; }
+  .note {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-top: 1rem;
+    line-height: 1.6;
+  }
+  .note code { background: var(--code-bg); border-radius: 4px; padding: 0.05rem 0.3rem; }
+
+  /* ---------- Footer ---------- */
+  footer {
+    margin-top: 3.5rem;
+    padding: 1.75rem 0 2.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.8rem;
+    line-height: 1.7;
+    text-align: center;
+  }
+  footer a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+  footer a:hover { color: var(--link); }
+  footer .foot-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.4rem 1rem;
+    margin-bottom: 0.6rem;
   }
 </style>
 </head>
 <body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <span class="eyebrow">Local &middot; stdlib-only &middot; OpenAI-compatible</span>
+    <h1 class="title">Local LLM</h1>
+    <p class="tagline">
+      Run big open-weight GGUF models on your own machine &mdash; CPU or GPU &mdash;
+      behind a plain OpenAI-compatible HTTP API. No cloud, no accounts, no build step
+      in this GUI.
+    </p>
+    <div class="badge-row">
+      <span class="pill">llama.cpp under the hood</span>
+      <span class="pill">Python stdlib only, no deps</span>
+      <span class="pill">CPU-safe by default</span>
+      <span class="pill">POST /v1/chat/completions</span>
+    </div>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#install">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        Install
+      </a>
+      <a class="btn btn-secondary" href="https://github.com/coleman-sagil/local-llm" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.09 3.29 9.4 7.86 10.93.57.1.78-.25.78-.55 0-.27-.01-1-.01-1.96-3.2.7-3.87-1.54-3.87-1.54-.53-1.33-1.29-1.69-1.29-1.69-1.05-.72.08-.7.08-.7 1.17.08 1.78 1.2 1.78 1.2 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.25.45-2.28 1.19-3.08-.12-.29-.51-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.24 2.76.12 3.05.74.8 1.18 1.83 1.18 3.08 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.07.78 2.15 0 1.55-.01 2.8-.01 3.18 0 .3.2.66.79.55A10.52 10.52 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+        GitHub Repo
+      </a>
+    </div>
+  </div>
+</header>
+
 <div class="wrap">
-  <h1>Local LLM</h1>
-  <p class="sub">Pick a model. Each launches its own llama.cpp chat window (CPU-only, safe to run alongside mining).</p>
 
-  <div class="card">
-    <h2>Coding: Qwen3-Coder-Next</h2>
-    <p class="desc">Qwen3-Coder-Next-UD-Q4_K_M &middot; port 8091</p>
-    <button class="launch" data-model="qwen">Launch Qwen</button>
-    <div class="status" id="status-qwen"></div>
-    <div class="fallback">
-      If the button doesn't work (server not running), run this from the project root instead:
-      <pre class="cmd">./gui/launch.sh qwen</pre>
+  <section class="block" id="how-it-works">
+    <h2 class="section-title">How it fits together</h2>
+    <p class="section-sub">
+      One idea underneath everything: a model file on disk becomes a live HTTP
+      server, and every front end is just a client of that server.
+    </p>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="k">1. Weights</div>
+        <div class="v">GGUF file on disk</div>
+        <div class="d">models/&lt;name&gt;/*.gguf &mdash; downloaded once, gitignored</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step">
+        <div class="k">2. Engine</div>
+        <div class="v">llama-server (llama.cpp)</div>
+        <div class="d">One process per model, OpenAI-compatible on a fixed port</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step">
+        <div class="k">3. Front end</div>
+        <div class="v">This picker, or the CLI</div>
+        <div class="d">POST /v1/chat/completions &mdash; same contract either way</div>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <div class="card">
-    <h2>General: Llama-4-Scout</h2>
-    <p class="desc">Llama-4-Scout-17B-16E-Instruct-Q4_K_M &middot; port 8090</p>
-    <button class="launch" data-model="scout">Launch Scout</button>
-    <div class="status" id="status-scout"></div>
-    <div class="fallback">
-      If the button doesn't work (server not running), run this from the project root instead:
-      <pre class="cmd">./gui/launch.sh scout</pre>
-    </div>
-  </div>
+  <section class="block" id="models">
+    <h2 class="section-title">Launch a model</h2>
+    <p class="section-sub">
+      Each button POSTs to the local <code>picker_server.py</code> backend, which
+      shells out to <code>gui/launch.sh &lt;model&gt;</code>. That starts the model
+      CPU-only via <code>bin/start-model.sh &lt;model&gt; --cpu-only</code> if it
+      isn't already running, then opens the model's built-in chat webui in its own
+      app-mode browser window. CPU loading is slow &mdash; give it a minute after
+      the button reports &ldquo;launching&rdquo;.
+    </p>
 
-  <div class="card">
-    <h2>General: Qwen3-Next-80B-A3B-Instruct</h2>
-    <p class="desc">Same architecture as Qwen3-Coder-Next above, general-purpose instead of coding-tuned &middot; port 8092</p>
-    <button class="launch" data-model="qwen-next">Launch Qwen3-Next</button>
-    <div class="status" id="status-qwen-next"></div>
-    <div class="fallback">
-      If the button doesn't work (server not running), run this from the project root instead:
-      <pre class="cmd">./gui/launch.sh qwen-next</pre>
+    <div class="card-grid">
+
+      <div class="card">
+        <span class="tag">Coding</span>
+        <h3>Qwen3-Coder-Next</h3>
+        <p class="desc">Qwen3-Coder-Next-UD-Q4_K_M &middot; port 8091</p>
+        <button class="launch" data-model="qwen">Launch Qwen</button>
+        <div class="status" id="status-qwen"></div>
+        <div class="fallback">
+          If the button doesn't work (server not running), run this from the project root instead:
+          <pre class="cmd">./gui/launch.sh qwen</pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="tag">General</span>
+        <h3>Llama-4-Scout</h3>
+        <p class="desc">Llama-4-Scout-17B-16E-Instruct-Q4_K_M &middot; port 8090</p>
+        <button class="launch" data-model="scout">Launch Scout</button>
+        <div class="status" id="status-scout"></div>
+        <div class="fallback">
+          If the button doesn't work (server not running), run this from the project root instead:
+          <pre class="cmd">./gui/launch.sh scout</pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="tag">General</span>
+        <h3>Qwen3-Next-80B-A3B-Instruct</h3>
+        <p class="desc">Same backbone as Qwen3-Coder-Next, instruct-tuned instead of code-tuned &middot; port 8092</p>
+        <button class="launch" data-model="qwen-next">Launch Qwen3-Next</button>
+        <div class="status" id="status-qwen-next"></div>
+        <div class="fallback">
+          If the button doesn't work (server not running), run this from the project root instead:
+          <pre class="cmd">./gui/launch.sh qwen-next</pre>
+        </div>
+      </div>
+
     </div>
-  </div>
+  </section>
+
+  <section class="block" id="install">
+    <h2 class="section-title">Install</h2>
+    <p class="section-sub">
+      There's no packaged installer &mdash; this is the real, documented setup
+      sequence from <a href="https://github.com/coleman-sagil/local-llm/blob/master/docs/TUTORIAL.md" target="_blank" rel="noopener"><code>docs/TUTORIAL.md</code></a>.
+      Steps 3 and 4 are scripted; step 2 (the CUDA build of <code>llama-server</code>)
+      is machine-specific and intentionally isn't, so it isn't scripted here either.
+    </p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-head"><span class="num">1</span><span class="step-title">Clone the repo</span></div>
+        <pre class="cmd">git clone https://github.com/coleman-sagil/local-llm.git
+cd local-llm</pre>
+      </div>
+      <div class="step">
+        <div class="step-head"><span class="num">2</span><span class="step-title">Build llama.cpp's <code>llama-server</code></span></div>
+        <p>
+          Vendored into <code>llama.cpp/</code> and gitignored on purpose &mdash; it needs
+          a CUDA build specific to your GPU/toolkit, so there's no single command that
+          works across machines. Follow
+          <a href="https://github.com/ggerganov/llama.cpp" target="_blank" rel="noopener">llama.cpp's own build docs</a>
+          and confirm the binary lands at:
+        </p>
+        <pre class="cmd">llama.cpp/build/bin/llama-server</pre>
+      </div>
+      <div class="step">
+        <div class="step-head"><span class="num">3</span><span class="step-title">Download the models</span></div>
+        <p>Fetches all three GGUF targets (see the <a href="#gguf">GGUF Models</a> section below for exactly what this pulls):</p>
+        <pre class="cmd">./download_models.sh</pre>
+      </div>
+      <div class="step">
+        <div class="step-head"><span class="num">4</span><span class="step-title">Launch the picker</span></div>
+        <p>The real front door &mdash; starts <code>picker_server.py</code> and opens this page in an app-mode browser window:</p>
+        <pre class="cmd">./gui/launch-picker.sh</pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="gguf">
+    <h2 class="section-title">GGUF Models</h2>
+    <p class="section-sub">
+      The three GGUF targets <code>download_models.sh</code> pulls from Hugging Face.
+      (<code>download_models.py</code> also exists but is known not to work on IPv6-only
+      links, per <code>docs/TUTORIAL.md</code> &mdash; use the shell script.)
+    </p>
+
+    <div class="table-scroll">
+      <table class="gguf">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Quant</th>
+            <th>Source (Hugging Face)</th>
+            <th>Files</th>
+            <th>Size</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Llama-4-Scout-17B-16E-Instruct</td>
+            <td class="mono">Q4_K_M</td>
+            <td><a href="https://huggingface.co/unsloth/Llama-4-Scout-17B-16E-Instruct-GGUF" target="_blank" rel="noopener">unsloth/Llama-4-Scout-17B-16E-Instruct-GGUF</a></td>
+            <td>2 (split)</td>
+            <td>~60.9&nbsp;GiB</td>
+          </tr>
+          <tr>
+            <td>Qwen3-Coder-Next</td>
+            <td class="mono">UD-Q4_K_M</td>
+            <td><a href="https://huggingface.co/unsloth/Qwen3-Coder-Next-GGUF" target="_blank" rel="noopener">unsloth/Qwen3-Coder-Next-GGUF</a></td>
+            <td>1</td>
+            <td>~45.9&nbsp;GiB</td>
+          </tr>
+          <tr>
+            <td>Qwen3-Next-80B-A3B-Instruct</td>
+            <td class="mono">UD-Q4_K_XL</td>
+            <td><a href="https://huggingface.co/unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF" target="_blank" rel="noopener">unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF</a></td>
+            <td>1</td>
+            <td>~42.9&nbsp;GiB</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="gguf-cmds">
+      <div class="gguf-cmd-card">
+        <h4>Llama-4-Scout-17B-16E-Instruct &middot; Q4_K_M</h4>
+        <div class="meta">2 parts &middot; 46.4&nbsp;GiB + 14.5&nbsp;GiB &middot; lands in <code>models/llama-4-scout/</code></div>
+        <pre class="cmd">curl -L -C - --retry 5 --retry-delay 5 \
+  -o models/llama-4-scout/Llama-4-Scout-17B-16E-Instruct-Q4_K_M-00001-of-00002.gguf \
+  "https://huggingface.co/unsloth/Llama-4-Scout-17B-16E-Instruct-GGUF/resolve/main/Q4_K_M/Llama-4-Scout-17B-16E-Instruct-Q4_K_M-00001-of-00002.gguf"
+
+curl -L -C - --retry 5 --retry-delay 5 \
+  -o models/llama-4-scout/Llama-4-Scout-17B-16E-Instruct-Q4_K_M-00002-of-00002.gguf \
+  "https://huggingface.co/unsloth/Llama-4-Scout-17B-16E-Instruct-GGUF/resolve/main/Q4_K_M/Llama-4-Scout-17B-16E-Instruct-Q4_K_M-00002-of-00002.gguf"</pre>
+      </div>
+
+      <div class="gguf-cmd-card">
+        <h4>Qwen3-Coder-Next &middot; UD-Q4_K_M</h4>
+        <div class="meta">1 file &middot; 45.9&nbsp;GiB &middot; lands in <code>models/qwen3-coder-next/</code></div>
+        <pre class="cmd">curl -L -C - --retry 5 --retry-delay 5 \
+  -o models/qwen3-coder-next/Qwen3-Coder-Next-UD-Q4_K_M.gguf \
+  "https://huggingface.co/unsloth/Qwen3-Coder-Next-GGUF/resolve/main/Qwen3-Coder-Next-UD-Q4_K_M.gguf"</pre>
+      </div>
+
+      <div class="gguf-cmd-card">
+        <h4>Qwen3-Next-80B-A3B-Instruct &middot; UD-Q4_K_XL</h4>
+        <div class="meta">1 file &middot; 42.9&nbsp;GiB &middot; lands in <code>models/qwen3-next-instruct/</code></div>
+        <pre class="cmd">curl -L -C - --retry 5 --retry-delay 5 \
+  -o models/qwen3-next-instruct/Qwen3-Next-80B-A3B-Instruct-UD-Q4_K_XL.gguf \
+  "https://huggingface.co/unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF/resolve/main/Qwen3-Next-80B-A3B-Instruct-UD-Q4_K_XL.gguf"</pre>
+      </div>
+    </div>
+
+    <p class="note">
+      Or just run <code>./download_models.sh</code> from the project root to fetch all
+      three in one go &mdash; the commands above are that script's own <code>curl</code>
+      calls, shown per-model. Sizes are exact file sizes reported by the Hugging Face
+      CDN at time of writing; upstream files can change without notice, so treat them
+      as approximate.
+    </p>
+  </section>
 
   <footer>
-    Buttons POST to a local <code>picker_server.py</code> backend (if it's running) which shells out to
-    <code>gui/launch.sh &lt;model&gt;</code>. That script starts the model CPU-only via
-    <code>bin/start-model.sh &lt;model&gt; --cpu-only</code> if it isn't already up, then opens the model's
-    built-in chat webui in its own app-mode browser window. Loading is slow on CPU-only &mdash; give it a
-    minute after the button reports "launching".
+    <div class="foot-links">
+      <a href="https://github.com/coleman-sagil/local-llm" target="_blank" rel="noopener">GitHub Repo</a>
+      <a href="https://github.com/coleman-sagil/local-llm/blob/master/docs/TUTORIAL.md" target="_blank" rel="noopener">Full Tutorial</a>
+      <a href="#install">Install</a>
+      <a href="#gguf">GGUF Models</a>
+    </div>
+    Built on <a href="https://github.com/ggerganov/llama.cpp" target="_blank" rel="noopener">llama.cpp</a>
+    &middot; OpenAI-compatible <code>/v1/chat/completions</code> API
+    &middot; stdlib-only Python front ends, no CDN, no build step.
   </footer>
+
 </div>
 
 <script>
