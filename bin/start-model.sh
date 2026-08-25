@@ -56,13 +56,23 @@ case "$MODEL" in
     # 80B-A3B hybrid-attention MoE backbone, instruct-tuned generally
     # instead of fine-tuned for code. Same offload recipe applies.
     #
-    # GPU_CTX raised 4096 -> 8192 (2026-08-25) to fit the merged
+    # GPU_CTX history: 4096 -> 8192 (2026-08-25) to fit the merged
     # filesystem+playwright MCP tool schema (~6637 tokens) plus room for
-    # real conversation on top of it -- see cli/mcp_servers.json's
-    # playwright entry for the measurement this was sized against.
+    # real conversation on top of it. That still overflowed mid-conversation
+    # ("request (8198 tokens) exceeds the available context size (8192
+    # tokens)") after ~8 exchanges, so raised again the same day to 131072
+    # after empirically testing the real ceiling on this 8GB card: 32768 used
+    # ~4.0GB VRAM, 131072 used ~6.4GB (verified stable across an actual
+    # generation, not just at load), 262144 hard-OOMs at startup (tried to
+    # cudaMalloc 6.1GB for KV cache alone, more than the remaining headroom).
+    # 131072 leaves a real ~1.7GB safety margin against other GPU consumers
+    # (idle mining, browser, desktop) -- don't raise further without redoing
+    # this same empirical check, and don't trust linear extrapolation from a
+    # smaller context (32768->131072 was a 4x context increase for only ~1.6x
+    # more VRAM, i.e. sub-linear, right up until it wasn't).
     PORT=8092
     MODEL_PATH="$ROOT_DIR/models/qwen3-next-instruct/Qwen3-Next-80B-A3B-Instruct-UD-Q4_K_XL.gguf"
-    GPU_CTX=8192
+    GPU_CTX=131072
     ;;
 esac
 
