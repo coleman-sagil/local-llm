@@ -15,8 +15,7 @@
       ]
     },
     "playwright": {
-      "enabled": false,
-      "disabledReason": "Verified 2026-07-15: filesystem (14 tools) + playwright (24 tools) together produce a ~6735-token merged schema, which exceeds every model's current context window (2048-4096 tokens, see GPU_CTX/CTX in bin/start-model.sh) - a fresh --tools session with both enabled fails on the first message with 'exceeds context size'. filesystem alone is ~2.4k tokens and fits comfortably. To re-enable browsing: flip this to true AND raise GPU_CTX/CTX for whichever model you're using in bin/start-model.sh (roughly 8192+ recommended to leave room for real conversation on top of the schema) - test the new context size doesn't OOM the 8GB card before relying on it.",
+      "enabled": true,
       "description": "Unrestricted headless browser automation (navigate, click, type, screenshot, evaluate JS, etc.) - per the user's explicit broad-access choice, not locked to specific sites. Via @playwright/mcp (Microsoft's official Playwright MCP server - @modelcontextprotocol/server-puppeteer is dead/deprecated, do not use it). --isolated keeps the browser profile in-memory only (no persistent user-data-dir). --executable-path points at the system's installed google-chrome so this server doesn't try to download its own Chromium. Same y/n-per-call confirmation model as every other tool in llmcli.py --tools.",
       "command": "/home/mateo/local-llm/.tools/node22/bin/node",
       "args": [
@@ -30,7 +29,7 @@
       ],
       "notes": [
         "Same node22-direct-invocation pattern as the filesystem entry above, for the same reason.",
-        "This server's tool schema alone is ~24 tools / ~17.7KB (roughly 4400 tokens by a bytes/4 estimate) - on its own that is already close to or over the 4096-token context window these models currently run with (see GPU_CTX/CTX in bin/start-model.sh). Combined with filesystem's ~14 tools, the merged schema does not fit in a 4096-token context at all (measured: ~6637 prompt tokens for the merged schema alone against the live qwen-next server, which rejected it with 'exceeds the available context size'). llmcli.py prints a startup warning if the merged schema looks too large for the connected model's actual context size (queried live from /slots). If you hit 'exceeds context size' errors, disable one server here rather than running both against a small-context model, or raise GPU_CTX/CTX in bin/start-model.sh if you have the VRAM/RAM to spare."
+        "This server's tool schema alone is ~24 tools / ~17.7KB (roughly 4400 tokens by a bytes/4 estimate). Combined with filesystem's ~14 tools, the merged schema measured ~6637 prompt tokens against a live qwen-next server. Re-enabled 2026-08-25 by raising qwen-next's GPU_CTX from 4096 to 8192 in bin/start-model.sh (see that file's qwen-next case) to fit the merged schema plus real conversation headroom. llmcli.py prints a startup warning if the merged schema looks too large for the connected model's actual context size (queried live from /slots). If you hit 'exceeds context size' errors again (e.g. running scout, which is still at a smaller GPU_CTX), disable one server here rather than running both against a small-context model, or raise that model's GPU_CTX/CTX if you have the VRAM/RAM to spare."
       ]
     },
     "google-drive": {

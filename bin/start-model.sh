@@ -55,9 +55,14 @@ case "$MODEL" in
     # General-purpose sibling of qwen (Qwen3-Coder-Next): same Qwen3-Next
     # 80B-A3B hybrid-attention MoE backbone, instruct-tuned generally
     # instead of fine-tuned for code. Same offload recipe applies.
+    #
+    # GPU_CTX raised 4096 -> 8192 (2026-08-25) to fit the merged
+    # filesystem+playwright MCP tool schema (~6637 tokens) plus room for
+    # real conversation on top of it -- see cli/mcp_servers.json's
+    # playwright entry for the measurement this was sized against.
     PORT=8092
     MODEL_PATH="$ROOT_DIR/models/qwen3-next-instruct/Qwen3-Next-80B-A3B-Instruct-UD-Q4_K_XL.gguf"
-    GPU_CTX=4096
+    GPU_CTX=8192
     ;;
 esac
 
