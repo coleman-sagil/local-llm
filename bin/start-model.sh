@@ -42,12 +42,12 @@ mkdir -p "$LOG_DIR" "$RUN_DIR"
 
 case "$MODEL" in
   scout)
-    PORT=8090
+    PORT="${LLAMA_PORT:-8090}"
     MODEL_PATH="$ROOT_DIR/models/llama-4-scout/Llama-4-Scout-17B-16E-Instruct-Q4_K_M-00001-of-00002.gguf"
     GPU_CTX=2048
     ;;
   qwen)
-    PORT=8091
+    PORT="${LLAMA_PORT:-8091}"
     MODEL_PATH="$ROOT_DIR/models/qwen3-coder-next/Qwen3-Coder-Next-UD-Q4_K_M.gguf"
     GPU_CTX=4096
     ;;
@@ -70,7 +70,7 @@ case "$MODEL" in
     # this same empirical check, and don't trust linear extrapolation from a
     # smaller context (32768->131072 was a 4x context increase for only ~1.6x
     # more VRAM, i.e. sub-linear, right up until it wasn't).
-    PORT=8092
+    PORT="${LLAMA_PORT:-8092}"
     MODEL_PATH="$ROOT_DIR/models/qwen3-next-instruct/Qwen3-Next-80B-A3B-Instruct-UD-Q4_K_XL.gguf"
     GPU_CTX=131072
     ;;
@@ -131,7 +131,7 @@ fi
 
 nohup "$LLAMA_SERVER" \
   -m "$MODEL_PATH" \
-  --host 127.0.0.1 \
+  --host "${LLAMA_HOST:-127.0.0.1}" \
   --port "$PORT" \
   -c "$CTX" \
   --jinja \
