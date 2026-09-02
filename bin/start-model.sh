@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# start-model.sh <scout|qwen|qwen-next> [--cpu-only]
+# start-model.sh <qwen|qwen-next> [--cpu-only]
 #
 # Launches llama-server for the given model, backgrounded, and waits until it
 # is confirmed listening (or confirmed failed) before returning.
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <scout|qwen|qwen-next> [--cpu-only]" >&2
+  echo "Usage: $0 <qwen|qwen-next> [--cpu-only]" >&2
   exit 1
 }
 
@@ -14,9 +14,9 @@ MODEL="${1:-}"
 [[ -n "$MODEL" ]] || usage
 
 case "$MODEL" in
-  scout|qwen|qwen-next) ;;
+  qwen|qwen-next) ;;
   *)
-    echo "Error: unknown model '$MODEL'. Must be 'scout', 'qwen', or 'qwen-next'." >&2
+    echo "Error: unknown model '$MODEL'. Must be 'qwen' or 'qwen-next'." >&2
     exit 1
     ;;
 esac
@@ -41,11 +41,6 @@ RUN_DIR="$ROOT_DIR/run"
 mkdir -p "$LOG_DIR" "$RUN_DIR"
 
 case "$MODEL" in
-  scout)
-    PORT="${LLAMA_PORT:-8090}"
-    MODEL_PATH="$ROOT_DIR/models/llama-4-scout/Llama-4-Scout-17B-16E-Instruct-Q4_K_M-00001-of-00002.gguf"
-    GPU_CTX=2048
-    ;;
   qwen)
     PORT="${LLAMA_PORT:-8091}"
     MODEL_PATH="$ROOT_DIR/models/qwen3-coder-next/Qwen3-Coder-Next-UD-Q4_K_M.gguf"
