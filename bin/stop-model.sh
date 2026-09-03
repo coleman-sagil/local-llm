@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# stop-model.sh <scout|qwen|qwen-next>
+# stop-model.sh <qwen|qwen-next|qwen2.5|wrn>
 #
 # Stops the llama-server process started by start-model.sh for the given
 # model. Does not touch mining/systemd in any way.
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <scout|qwen|qwen-next>" >&2
+  echo "Usage: $0 <qwen|qwen-next|qwen2.5|wrn>" >&2
   exit 1
 }
 
@@ -14,9 +14,9 @@ MODEL="${1:-}"
 [[ -n "$MODEL" ]] || usage
 
 case "$MODEL" in
-  scout|qwen|qwen-next) ;;
+  qwen|qwen-next|qwen2.5|wrn) ;;
   *)
-    echo "Error: unknown model '$MODEL'. Must be 'scout', 'qwen', or 'qwen-next'." >&2
+    echo "Error: unknown model '$MODEL'. Must be 'qwen', 'qwen-next', 'qwen2.5', or 'wrn'." >&2
     exit 1
     ;;
 esac

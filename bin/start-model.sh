@@ -1,12 +1,32 @@
 #!/usr/bin/env bash
-# start-model.sh <qwen|qwen-next> [--cpu-only]
+# start-model.sh <qwen|qwen-next|qwen2.5|wrn> [--cpu-only]
 #
 # Launches llama-server for the given model, backgrounded, and waits until it
 # is confirmed listening (or confirmed failed) before returning.
+#
+# Model families and the offload recipe each one needs:
+#   qwen       Qwen3-Coder-Next  - Qwen3-Next 80B-A3B hybrid-attention MoE. The
+#                                  experts are huge and mostly cold, so they go
+#                                  to CPU RAM (--cpu-moe) while everything else
+#                                  goes to GPU (-ngl 999).
+#   qwen-next  Qwen3-Next-80B-A3B-Instruct - same MoE backbone as qwen, same
+#                                  --cpu-moe + -ngl 999 recipe.
+#   qwen2.5    Qwen2.5-7B-Instruct - DENSE 7B. Every layer fits on the 6GB card,
+#                                  so all of it goes to GPU (-ngl 99) with NO
+#                                  --cpu-moe (there are no experts to offload;
+#                                  passing --cpu-moe here would be a no-op at
+#                                  best and confusing at worst).
+#   wrn        WhiteRabbitNeo-V3-7B - DENSE (Llama-3.1-8B based, ~8B params),
+#                                  same dense GPU recipe as qwen2.5.
+#
+# Flash Attention (-fa on) is forced for the dense models: it shrinks the KV
+# cache and was confirmed working on this Turing / sm_75 card in the Phase 1
+# smoke test. The MoE models are left exactly as they were (no -fa) - changing
+# their launch flags is out of scope for this revision.
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <qwen|qwen-next> [--cpu-only]" >&2
+  echo "Usage: $0 <qwen|qwen-next|qwen2.5|wrn> [--cpu-only]" >&2
   exit 1
 }
 
@@ -14,9 +34,9 @@ MODEL="${1:-}"
 [[ -n "$MODEL" ]] || usage
 
 case "$MODEL" in
-  qwen|qwen-next) ;;
+  qwen|qwen-next|qwen2.5|wrn) ;;
   *)
-    echo "Error: unknown model '$MODEL'. Must be 'qwen' or 'qwen-next'." >&2
+    echo "Error: unknown model '$MODEL'. Must be 'qwen', 'qwen-next', 'qwen2.5', or 'wrn'." >&2
     exit 1
     ;;
 esac
@@ -40,11 +60,16 @@ RUN_DIR="$ROOT_DIR/run"
 
 mkdir -p "$LOG_DIR" "$RUN_DIR"
 
+# Per-model config. MOE=1 selects the expert-offload GPU recipe
+# (-ngl 999 --cpu-moe); MOE=0 selects the dense all-on-GPU recipe
+# (-ngl 99 -fa on). GPU_CTX is the context size used in GPU mode only
+# (--cpu-only always falls back to a small 4096 ctx below).
 case "$MODEL" in
   qwen)
     PORT="${LLAMA_PORT:-8091}"
     MODEL_PATH="$ROOT_DIR/models/qwen3-coder-next/Qwen3-Coder-Next-UD-Q4_K_M.gguf"
     GPU_CTX=4096
+    MOE=1
     ;;
   qwen-next)
     # General-purpose sibling of qwen (Qwen3-Coder-Next): same Qwen3-Next
@@ -68,6 +93,42 @@ case "$MODEL" in
     PORT="${LLAMA_PORT:-8092}"
     MODEL_PATH="$ROOT_DIR/models/qwen3-next-instruct/Qwen3-Next-80B-A3B-Instruct-UD-Q4_K_XL.gguf"
     GPU_CTX=131072
+    MOE=1
+    ;;
+  qwen2.5)
+    # DENSE Qwen2.5-7B-Instruct, Q4_K_M (~4.68GB of weights). General-purpose
+    # dense worker for Phase 1. All layers on GPU (-ngl 99), -fa on, q8_0 KV.
+    #
+    # Measured on this card (RTX 2060 Max-Q, ~5746 MiB usable after desktop),
+    # -ngl 99 --jinja -fa on --cache-type-k q8_0 --cache-type-v q8_0:
+    #     -c 32768 -> 5389 MiB used / 359 MiB free   (works; too tight vs. desktop drift)
+    #     -c 16384 -> ~4900 MiB used / ~850 MiB free (safe default, extrapolated + smoke-anchored)
+    # q8_0 K+V roughly halves the KV cache (28 layers, 4 KV heads x 128); the
+    # symmetric q8_0/q8_0 D128 fused FA kernel IS in this build (no
+    # -DGGML_CUDA_FA_ALL_QUANTS needed). Push -c to 24576/32768 only when the
+    # GPU is otherwise idle; re-measure with nvidia-smi during a real
+    # generation before trusting a bigger number.
+    PORT="${LLAMA_PORT:-8093}"
+    MODEL_PATH="$ROOT_DIR/models/qwen2.5-7b-instruct/Qwen2.5-7B-Instruct-Q4_K_M.gguf"
+    GPU_CTX=16384
+    MOE=0
+    ;;
+  wrn)
+    # DENSE WhiteRabbitNeo-V3-7B, Q4_K_M (~4.68GB of weights). Llama-3.1-8B
+    # based (~8B params) security/offensive-tooling specialist. All layers on
+    # GPU (-ngl 99), -fa on, q8_0 KV.
+    #
+    # Llama-3.1-8B geometry (32 layers, 8 KV heads x 128) makes the KV cache
+    # ~2.3x qwen2.5's per token; f16 KV would OOM past ~4096 on this card, so
+    # q8_0 K+V is effectively required here. Measured, -ngl 99 -fa on
+    # --cache-type-k q8_0 --cache-type-v q8_0:
+    #     -c 8192  -> 4651 MiB used / 1097 MiB free   (verified, comfortable)
+    #     -c 16384 -> ~5200 MiB used / ~550 MiB free  (extrapolated; try + watch nvidia-smi)
+    # 8192 is the safe default. Do NOT drop the q8_0 flags for this model.
+    PORT="${LLAMA_PORT:-8094}"
+    MODEL_PATH="$ROOT_DIR/models/whiterabbitneo-v3-7b/WhiteRabbitNeo_WhiteRabbitNeo-V3-7B-Q4_K_M.gguf"
+    GPU_CTX=8192
+    MOE=0
     ;;
 esac
 
@@ -106,7 +167,17 @@ if [[ "$CPU_ONLY" -eq 1 ]]; then
   EXTRA_ARGS=(-ngl 0 --threads "$THREADS")
   CTX=4096
 else
-  EXTRA_ARGS=(-ngl 999 --cpu-moe --threads "$THREADS")
+  if [[ "$MOE" -eq 1 ]]; then
+    # MoE: non-expert weights on GPU, all expert weights on CPU RAM.
+    EXTRA_ARGS=(-ngl 999 --cpu-moe --threads "$THREADS")
+  else
+    # Dense: every layer on GPU, Flash Attention on, q8_0 K+V cache. -fa and
+    # the symmetric q8_0/q8_0 D128 fused kernel are both confirmed working on
+    # this Turing / sm_75 build (no -DGGML_CUDA_FA_ALL_QUANTS needed). q8_0 KV
+    # roughly halves the cache and is what keeps these 7-8B models inside 6GB
+    # at a useful context. See the per-model GPU_CTX comments for measured VRAM.
+    EXTRA_ARGS=(-ngl 99 -fa on --cache-type-k q8_0 --cache-type-v q8_0 --threads "$THREADS")
+  fi
   CTX="$GPU_CTX"
 
   if systemctl is-active --quiet nicehash-miner.service; then
