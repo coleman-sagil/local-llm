@@ -19,6 +19,14 @@ Fixed port contract (do not change without updating bin/start-model.sh too):
     qwen       -> http://127.0.0.1:8091   (Qwen3-Coder-Next, coding specialist)
     qwen-next  -> http://127.0.0.1:8092   (Qwen3-Next-80B-A3B-Instruct, general-purpose
                                             sibling of qwen - same architecture/backbone)
+    qwen2.5    -> http://127.0.0.1:8093   (Qwen2.5-7B-Instruct, dense general-purpose)
+    wrn        -> http://127.0.0.1:8094   (WhiteRabbitNeo-V3-7B, dense security specialist)
+
+Multi-host: set LLM_HOST (default 127.0.0.1) to aim the port-based targets above
+at another machine's llama-server ports (LAN or tailnet). The separate target
+"popos" talks to the remote pop-os head node over its https Tailscale Serve
+endpoint (no port, LLM_HOST unused); its wire model id is read from
+GET /v1/models at run time.
 """
 
 import argparse
@@ -37,13 +45,52 @@ MODEL_PORTS = {
     "scout": 8090,
     "qwen": 8091,
     "qwen-next": 8092,
+    "qwen2.5": 8093,
+    "wrn": 8094,
 }
+
+# Host for the port-based targets above. Override to aim this CLI at another
+# machine running the same llama-server ports (LAN or tailnet). REMOTE_TARGETS
+# entries ignore this - they carry a full base URL.
+LLM_HOST = (os.environ.get("LLM_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+
+# Fixed-URL targets that are NOT "host:port on LLM_HOST". The pop-os head node
+# is reached over its Tailscale Serve HTTPS endpoint (valid cert, no port). Its
+# wire model id is not hardcoded - resolve_wire_model() reads it at run time.
+REMOTE_TARGETS = {
+    "popos": "https://pop-os.tail1d1c9c.ts.net",
+}
+
+# Everything --model accepts: local model servers + remote aliases.
+ALL_TARGETS = sorted({*MODEL_PORTS, *REMOTE_TARGETS})
 
 REQUEST_TIMEOUT_CONNECT = 5  # seconds, just for the initial reachability probe
 
 
+def is_remote(model: str) -> bool:
+    return model in REMOTE_TARGETS
+
+
 def base_url_for(model: str) -> str:
-    return f"http://127.0.0.1:{MODEL_PORTS[model]}"
+    if model in REMOTE_TARGETS:
+        return REMOTE_TARGETS[model]
+    return f"http://{LLM_HOST}:{MODEL_PORTS[model]}"
+
+
+def resolve_wire_model(base_url: str):
+    """Ask the server which model id it actually serves (GET /v1/models) so the
+    request's "model" field can match it. A single-model llama-server is lenient
+    here, but a proxied/multi-model remote may not be. Returns None on any
+    failure; callers then just omit the field entirely."""
+    try:
+        resp = requests.get(f"{base_url}/v1/models", timeout=REQUEST_TIMEOUT_CONNECT)
+        resp.raise_for_status()
+        data = resp.json().get("data") or []
+    except (requests.exceptions.RequestException, ValueError):
+        return None
+    if data and isinstance(data[0], dict):
+        return data[0].get("id")
+    return None
 
 
 def server_reachable(base_url: str) -> bool:
@@ -57,6 +104,12 @@ def server_reachable(base_url: str) -> bool:
 
 
 def unreachable_message(model: str, base_url: str) -> str:
+    if is_remote(model):
+        return (
+            f"Error: can't reach {model} server at {base_url}. "
+            f"It's a remote head node - check the tailnet ('tailscale status') "
+            f"and that llama-server is running on the other end."
+        )
     return (
         f"Error: can't reach {model} server at {base_url}. "
         f"Start it with: bin/start-model.sh {model} --cpu-only "
@@ -68,7 +121,7 @@ def unreachable_message(model: str, base_url: str) -> str:
 # Core streaming chat
 # ---------------------------------------------------------------------------
 
-def stream_chat(base_url: str, messages: list) -> str:
+def stream_chat(base_url: str, messages: list, wire_model=None) -> str:
     """POST /v1/chat/completions with stream: true, print tokens as they
     arrive, and return the full assistant reply text (so it can be added
     back into conversation history).
@@ -76,12 +129,12 @@ def stream_chat(base_url: str, messages: list) -> str:
     Raises requests.exceptions.RequestException on connection failure -
     caller decides how to present that to the user.
     """
+    payload = {"messages": messages, "stream": True}
+    if wire_model:
+        payload["model"] = wire_model
     resp = requests.post(
         f"{base_url}/v1/chat/completions",
-        json={
-            "messages": messages,
-            "stream": True,
-        },
+        json=payload,
         stream=True,
         timeout=(REQUEST_TIMEOUT_CONNECT, None),  # no read timeout; tokens can be slow on CPU
     )
@@ -127,7 +180,9 @@ def run_chat_repl(model: str) -> None:
         print(unreachable_message(model, base_url), file=sys.stderr)
         sys.exit(1)
 
-    print(f"Connected to {model} at {base_url}. Commands: /clear, /exit (or Ctrl+C / Ctrl+D)\n")
+    wire_model = resolve_wire_model(base_url) if is_remote(model) else None
+    wire_note = f" [wire model: {wire_model}]" if wire_model else ""
+    print(f"Connected to {model} at {base_url}{wire_note}. Commands: /clear, /exit (or Ctrl+C / Ctrl+D)\n")
 
     messages = []
     while True:
@@ -153,7 +208,7 @@ def run_chat_repl(model: str) -> None:
         messages.append({"role": "user", "content": user_input})
         print(f"{model}> ", end="", flush=True)
         try:
-            reply = stream_chat(base_url, messages)
+            reply = stream_chat(base_url, messages, wire_model)
         except requests.exceptions.RequestException as exc:
             print(f"\nError talking to {model} server: {exc}", file=sys.stderr)
             print(unreachable_message(model, base_url), file=sys.stderr)
@@ -439,16 +494,15 @@ async def execute_tool(name: str, args: dict, dispatch: dict, sessions: dict) ->
     return f"[tool error] {text}" if result.isError else text
 
 
-def chat_once_with_tools(base_url: str, messages: list, tool_schemas: list) -> dict:
+def chat_once_with_tools(base_url: str, messages: list, tool_schemas: list, wire_model=None) -> dict:
     """Single non-streaming request, tools attached. Returns the response
     message dict (may contain tool_calls)."""
+    payload = {"messages": messages, "tools": tool_schemas, "stream": False}
+    if wire_model:
+        payload["model"] = wire_model
     resp = requests.post(
         f"{base_url}/v1/chat/completions",
-        json={
-            "messages": messages,
-            "tools": tool_schemas,
-            "stream": False,
-        },
+        json=payload,
         timeout=(REQUEST_TIMEOUT_CONNECT, None),
     )
     resp.raise_for_status()
@@ -499,6 +553,8 @@ async def run_tools_repl(model: str) -> None:
         print(unreachable_message(model, base_url), file=sys.stderr)
         sys.exit(1)
 
+    wire_model = resolve_wire_model(base_url) if is_remote(model) else None
+
     try:
         import mcp  # noqa: F401 (import-guard only; real imports happen where used)
     except ImportError:
@@ -547,7 +603,7 @@ async def run_tools_repl(model: str) -> None:
 
             try:
                 for _ in range(MAX_TOOL_ROUNDS):
-                    message = chat_once_with_tools(base_url, messages, tool_schemas)
+                    message = chat_once_with_tools(base_url, messages, tool_schemas, wire_model)
                     tool_calls = message.get("tool_calls")
 
                     if not tool_calls:
@@ -596,7 +652,15 @@ async def run_tools_repl(model: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Chat with a locally-served LLM (llama.cpp).")
-    parser.add_argument("--model", choices=sorted(MODEL_PORTS), required=True, help="Which model server to talk to.")
+    parser.add_argument(
+        "--model",
+        choices=ALL_TARGETS,
+        required=True,
+        help=(
+            "Target: a local model server (on LLM_HOST, default 127.0.0.1) or "
+            "'popos' for the remote head node's https endpoint."
+        ),
+    )
     parser.add_argument(
         "--tools",
         action="store_true",

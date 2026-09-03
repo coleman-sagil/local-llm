@@ -499,3 +499,233 @@ round-trip test (asking a model to echo back `Café naïve 🌟 résumé` and
 verifying the captured bytes decode as valid, correct UTF-8). If you ever
 see garbled non-ASCII text out of the CLI again, this line is the first
 place to check.
+# Local LLM Setup, continued: the multi-host picture
+
+> These sections extend `docs/TUTORIAL.md`. They pick up where section 7
+> (Troubleshooting) leaves off, and they assume you've read sections 1 and 6 —
+> the "a model file becomes an HTTP server, everything else is a client"
+> framing, and what `-ngl` / `--cpu-moe` actually do. Nothing below changes
+> the original contract; it widens it from "one machine" to "two machines,
+> and eventually more."
+
+## 8. The multi-host reality
+
+The original tutorial was written when this repo lived on a single box and
+that box *was* the whole system. That's no longer true. There are now two
+machines in play, they are physically in different places, and they do
+different jobs.
+
+**Zephy** — the machine this checkout is on — is an ASUS ROG G14 (GA401IV)
+running CachyOS. Its GPU is an RTX 2060 Max-Q with **6GB** of VRAM (about
+5746 MiB actually usable once the desktop has taken its share). CPU is a
+Ryzen 9 4900HS, 8 cores / 16 threads, 38GB RAM. Zephy runs small models
+*locally* on its own GPU, and the rest of the time it is a **client** of the
+other machine.
+
+> Note on the older sections: every "8GB", "NiceHash miner", and
+> "`nicehash-miner.service`" mention in sections 3–7 describes the *other*
+> machine's earlier configuration, not Zephy. Zephy has a 6GB card and no
+> miner. The miner-stop block is still in `bin/start-model.sh` because it's
+> harmless where the service doesn't exist (`systemctl is-active` just
+> returns non-zero and the block is skipped), and keeping one script that
+> works on both machines is worth more than trimming a dead branch.
+
+**pop-os** is a separate physical machine at a different site. Different
+user account (`mateo`, not `mateo_c-s`), its own disks, its own GPU (an RTX
+5060, 8GB). It is the **head node**: the big model lives there. You reach it
+only over the Tailscale tailnet — there is no LAN path from wherever Zephy
+usually is — and that link is roughly 50ms and DERP-relayed (relayed, not a
+direct WireGuard path), so it behaves like a modest-latency internet hop,
+not like localhost.
+
+pop-os runs **Qwen3-Next-80B-A3B-Instruct** under `llama-server`, and
+exposes it through Tailscale Serve at:
+
+```
+https://pop-os.tail1d1c9c.ts.net
+```
+
+That endpoint has a real, valid TLS cert (Tailscale issues it) and answers
+`POST /v1/chat/completions` with the same OpenAI-compatible shape as any
+local `llama-server`. pop-os also keeps a copy of Qwen3-Coder-Next, and is
+currently pulling down Qwen3-14B (`Q4_K_M`) for the Phase 2 VRAM-pool work.
+
+A peer session (called "WhiteOut") operates pop-os. This checkout cannot
+start, stop, or reconfigure anything on pop-os — coordination with that
+machine happens by message, and any claim about what's live on pop-os
+should be verified against the actual endpoint before you build on it.
+
+### Field mode vs office mode
+
+There are two completely different ways Zephy participates, and which one
+you're in is a physical fact about where the laptop is, not a config flag.
+
+**Field mode** is the default and covers everywhere except one wired desk.
+Zephy is away from pop-os. In this mode:
+
+- Zephy runs its **two local dense 7B models** on its own 6GB GPU (details
+  below), for anything that needs to be fast, offline, or private to the
+  laptop.
+- For the big model, Zephy is a **plain HTTPS client** of
+  `https://pop-os.tail1d1c9c.ts.net` — exactly the "just another client of
+  the same API" idea from section 1, with the base URL pointed at the
+  tailnet instead of `127.0.0.1`.
+- There is **no RPC, no VRAM pooling**. The tailnet WAN hop is far too slow
+  for llama.cpp's RPC compute protocol, which assumes a LAN.
+
+**Office mode** only exists when Zephy is physically carried to pop-os and
+plugged into the same wired LAN. Then, and only then, the two GPUs can be
+**pooled** over llama.cpp RPC: Zephy runs `ggml-rpc-server` bound to the
+office LAN interface, pop-os runs `llama-server --rpc <zephy-lan-ip>:50052`
+as the head, and a model too big for either card alone (Qwen3-14B dense,
+WhiteRabbitNeo-13B) runs split across both. This is Phase 2, and it is
+covered — with its security constraints, which are not optional — in
+`CLUSTER.md`.
+
+### The model / port table, as it stands now
+
+`scout` is gone (it was dropped — see the repo history). The current set:
+
+| Key | Model | Runs on | Port | Recipe | Family |
+|---|---|---|---|---|---|
+| `qwen` | Qwen3-Coder-Next (80B-A3B) | pop-os (head) | 8091 | `-ngl 999 --cpu-moe` | MoE |
+| `qwen-next` | Qwen3-Next-80B-A3B-Instruct | pop-os (head) | 8092 | `-ngl 999 --cpu-moe` | MoE |
+| `qwen2.5` | Qwen2.5-7B-Instruct | **Zephy (local GPU)** | **8093** | `-ngl 99 -fa on` | dense |
+| `wrn` | WhiteRabbitNeo-V3-7B | **Zephy (local GPU)** | **8094** | `-ngl 99 -fa on` | dense |
+
+The two dense entries are the new part. `qwen2.5` is the general-purpose
+local workhorse; `wrn` (WhiteRabbitNeo-V3-7B, a Llama-3.1-8B-based
+security-focused fine-tune, so ~8B parameters despite the "7B" in the name)
+is the local security specialist. Both are `Q4_K_M`, about 4.68GB on disk,
+and both live in `models/` (gitignored, byte-verified after download).
+
+Ports 8093 and 8094 continue the same fixed-port contract the original
+tutorial describes: a model key maps to exactly one port, that mapping lives
+in `bin/start-model.sh` and `cli/llmcli.py`, and any new front end just
+needs to know which port to POST to. The MoE ports (8091 / 8092) refer to a
+server on pop-os, reached via the tailnet URL rather than `127.0.0.1` —
+same contract, different host.
+
+## 9. MoE vs dense: why the launch recipe is not one-size-fits-all
+
+Section 6 explained `-ngl 999 --cpu-moe` for the big models. That recipe is
+**correct for MoE backbones and wrong for dense models**, and now that both
+kinds are in the repo it's worth stating the split plainly.
+
+**MoE models (`qwen`, `qwen-next`)** — the Qwen3-Next 80B-total / ~3B-active
+hybrid-attention MoE backbone. The quantized weights are tens of GB and do
+not fit in any GPU here. The trick from section 6 applies: `-ngl 999` puts
+every transformer *layer* on the GPU, and `--cpu-moe` then pulls the bulky,
+sparsely-used **expert feed-forward tensors** back out to CPU RAM, leaving
+only the attention and shared/routing weights — the parts that run on every
+token — in fast VRAM. Without `--cpu-moe` the server would try to place the
+full expert bank on the GPU and OOM immediately. These models run on pop-os,
+which has both the VRAM headroom and the RAM for the expert bank.
+
+**Dense models (`qwen2.5`, `wrn`)** — a dense model uses *every* weight on
+*every* token. There are no expert tensors, so there is nothing for
+`--cpu-moe` to offload; passing it on a dense model is a no-op at best and a
+misleading signal to the next reader at worst. Because these are only
+7–8B parameters at `Q4_K_M` (~4.7GB), the **whole model fits in Zephy's
+6GB VRAM**. So the recipe is the straightforward one:
+
+```
+-ngl 99        # every layer on the GPU (99 is "all of them", like 999 was)
+-fa on         # flash attention: Turing / sm_75 supports it, smoke-tested
+               # working on this card; it shrinks the KV-cache footprint
+# NO --cpu-moe
+```
+
+`-ngl 99` rather than `-ngl 999` is just cosmetic honesty — these models
+have far fewer than 99 layers, so either value means "all" — but it reads as
+"this is the small-model path," which is the point.
+
+**The empirical anchor** (from the Phase 1 smoke test, real numbers, so you
+don't have to guess): Qwen2.5-7B-Instruct `Q4_K_M`, launched with
+`-ngl 99 -c 4096 --jinja -fa on`, produced:
+
+- **4633 MiB VRAM used**, fully GPU-resident (no CPU-side layers)
+- **1115 MiB free** afterward
+- HTTP server **listening in ~6s** from launch
+- first coherent generation in **~4.7s**
+
+That's the basis for the default `GPU_CTX=8192` on the dense entries: the
+KV cache at 4096 context with flash attention is only ~230–250 MiB of that
+4633, so doubling to 8192 costs roughly another ~235 MiB and still leaves
+~880 MiB free. Pushing past 8192 is possible but starts competing with the
+browser and desktop for the last few hundred MiB — if you raise it, watch
+`nvidia-smi` across an actual generation (peak VRAM is higher than
+load-time VRAM) and back off if free drops under ~300 MiB.
+
+WhiteRabbitNeo-V3-7B is Llama-3.1-8B-based, so it has a few more layers than
+Qwen2.5-7B (32 vs 28). Treat the numbers above as a **lower bound** for
+`wrn` and verify with `nvidia-smi` if you tune its context.
+
+`--cpu-only` mode is unchanged for both families: `-ngl 0`, 4096 context,
+nothing touches the GPU, safe to run any time. Slow, but it's the fallback
+that always works.
+
+## 10. Reaching the pop-os head from Zephy
+
+From Zephy, the big model is just a remote HTTP API. Everything section 1
+says about clients applies unchanged — the only difference is the base URL.
+
+**The endpoint:**
+
+```
+https://pop-os.tail1d1c9c.ts.net/v1/chat/completions
+```
+
+**Prerequisite: Tailscale must be up on Zephy.** Check with `tailscale
+status`; you should see `pop-os` in the peer list. If Zephy isn't on the
+tailnet, this endpoint simply doesn't resolve — there is no other route to
+that machine.
+
+**A quick sanity check that won't mislead you:**
+
+```bash
+curl -s -H 'Accept-Encoding: identity' \
+  https://pop-os.tail1d1c9c.ts.net/v1/models
+```
+
+A real request with sane headers gets `HTTP 200` and a JSON model list. Note
+the header: a *bare* `curl` with no `Accept-Encoding` gets back a benign
+**`HTTP 415`** from the Serve front end — that is **not an outage**, it's an
+artifact of how the proxy negotiates encoding. Don't take a 415 from a
+header-less probe as "pop-os is down"; send a proper request before
+concluding anything.
+
+**A real chat call looks exactly like a local one:**
+
+```bash
+curl -s https://pop-os.tail1d1c9c.ts.net/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "qwen-next",
+    "messages": [{"role": "user", "content": "one-sentence sanity check please"}],
+    "stream": true
+  }'
+```
+
+Same `POST /v1/chat/completions`, same `{role, content}` message array, same
+server-sent-event stream back. `cli/llmcli.py` can talk to it by pointing
+`base_url_for()` at the tailnet URL instead of `http://127.0.0.1:<port>`
+(the `qwen` / `qwen-next` keys are the pop-os models).
+
+**What the network hop costs you.** The link is ~50ms and DERP-relayed, so:
+
+- Time-to-first-token has a visible network tax on top of pop-os's own
+  prompt-processing time. Fine for interactive chat; noticeable when you
+  shove a large prompt (e.g. a big merged MCP tool schema) across it.
+- Throughput of streamed tokens is generally fine — they're small SSE
+  frames — but a flaky tailnet (café Wi-Fi, Starlink weather) will show up
+  as stutter, not as a clean error.
+- **Do not** try to run llama.cpp RPC (`--rpc`) across this link. RPC ships
+  raw tensor data every compute step and assumes LAN latency; over the
+  tailnet it collapses. RPC / VRAM pooling is office-mode only (Phase 2).
+
+**Coordinating changes.** If the pop-os model set changes (a new port, a
+model swapped, the 14B coming online), that's a change made by the WhiteOut
+session on pop-os, not something this checkout can do. Confirm the live
+state against `/v1/models` on the endpoint before assuming a port contract
+still holds.
