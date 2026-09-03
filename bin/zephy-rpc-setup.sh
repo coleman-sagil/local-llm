@@ -135,10 +135,11 @@ cat > "${UNIT_FILE}" <<EOF
 # Do NOT 'systemctl enable' this unit.
 #
 # The pop-os head node then runs:
-#   llama-server -m Qwen3-14B-Q4_K_M.gguf --host 0.0.0.0 --port 8095 \\
-#       -c <CTX> -ngl 99 --jinja -fa on \\
-#       --rpc <this-machine-LAN-IP>:${RPC_PORT} --tensor-split <RATIO>
-# (see POOL.md)
+#   llama-server -m Qwen3-14B-Q4_K_M.gguf --host 127.0.0.1 --port 8095 \\
+#       -c 16384 -ngl 99 --jinja -fa on --cache-type-k q8_0 --cache-type-v q8_0 \\
+#       --device CUDA0,RPC0 --tensor-split 0.5,0.5 \\
+#       --rpc <this-machine-LAN-IP>:${RPC_PORT}
+# (--host 127.0.0.1, NOT 0.0.0.0 -- that API has no auth/TLS; see POOL.md)
 
 [Unit]
 Description=llama.cpp ggml-rpc-server (CUDA compute peer for pop-os VRAM pool)

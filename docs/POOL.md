@@ -60,7 +60,7 @@ Shut down in reverse: stop the pop-os head first, then
 # real device-enumeration order (RPC order is NOT guaranteed).
 llama-server \
   -m ~/models/qwen3-14b/Qwen3-14B-Q4_K_M.gguf \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8095 \
   -c 16384 \
   -ngl 99 \
@@ -71,6 +71,18 @@ llama-server \
   --tensor-split 0.5,0.5 \
   --rpc <ZEPHY-LAN-IP>:50052
 ```
+
+**`--host 127.0.0.1`, not `0.0.0.0`.** This is pop-os's own inference API and it
+has no auth and no TLS — the same reason the RPC port is LAN-only. `0.0.0.0` would
+expose it on every interface including `tailscale0` (`100.x:8095`) the moment it
+starts, bypassing the Tailscale-Serve-with-real-HTTPS pattern the production 80B
+endpoint uses. The verification step below only needs `curl localhost:8095/health`.
+If you want to reach this Phase-2 endpoint from another machine, do it deliberately
+through Tailscale Serve (`tailscale serve --bg --https 8443 127.0.0.1:8095`, then
+`https://pop-os.tail1d1c9c.ts.net:8443`), never a wide bind. When docked at the
+office and querying the pool from Zephy over the wired LAN, either run the client
+on pop-os, or add a single `--host <pop-os-office-lan-ip>` (the 10.1.10.x address,
+never `0.0.0.0`) for that session only.
 
 ### Starting values (from `docs/PARAMS.md` — verify on first real two-GPU launch)
 
