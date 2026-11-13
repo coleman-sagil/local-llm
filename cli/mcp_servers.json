@@ -1,51 +1,266 @@
 {
+  "_comment": "MCP servers for llmcli.py --tools. ${HOME} and ${CLI_DIR} (this directory) are substituted in command, args and env. --servers a,b,c uses exactly those; --servers +browser,+computer adds disabled ones to the enabled set. Every enabled server's tool schema is sent to the model on every request, so fewer is better on small contexts. An entry's optional \"tools\" map exposes ONLY the tools named in it, each cut down by its rule: keep = parameters shown to the model, set = arguments forced on every call, append = structured-result fields added to the text result, squeeze_indent = shrink deep indentation, description = replacement text. Every tool call still asks y/n in llmcli.py.",
   "servers": {
-    "filesystem": {
+    "terminal": {
       "enabled": true,
-      "description": "Broad filesystem read/write access rooted at /home/mateo - per the user's explicit broad-access choice. This also covers the synced Kearney & O'Banion Dropbox folder for free (no separate Dropbox integration needed). Via @modelcontextprotocol/server-filesystem (npx-launched Node MCP server, stdio transport). Same y/n-per-call confirmation model as every other tool in llmcli.py --tools - broad capability, not blind autonomy.",
-      "command": "/home/mateo/local-llm/.tools/node22/bin/node",
+      "description": "Shell access: run_command (bash -lc, timeout, truncated output). 1 tool.",
+      "command": "uv",
       "args": [
-        "/home/mateo/local-llm/.tools/node22/lib/node_modules/npm/bin/npx-cli.js",
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/home/mateo"
-      ],
-      "notes": [
-        "command is the node22 binary directly (not bare 'npx') running npx-cli.js as a script - this bypasses npx's own '#!/usr/bin/env node' shebang, which would otherwise re-resolve 'node' via PATH and silently find system Node 12 (EOL, apt) again, dying with 'SyntaxError: Unexpected reserved word'. This is the exact invocation verified end-to-end by cli/mcp_smoke_test.py. llmcli.py's loader also injects node22/bin at the front of PATH for every configured server as a second layer of defense, for anything a server spawns internally."
+        "run",
+        "--script",
+        "${CLI_DIR}/local_mcp.py",
+        "terminal"
       ]
     },
-    "playwright": {
+    "filesystem": {
       "enabled": true,
-      "description": "Unrestricted headless browser automation (navigate, click, type, screenshot, evaluate JS, etc.) - per the user's explicit broad-access choice, not locked to specific sites. Via @playwright/mcp (Microsoft's official Playwright MCP server - @modelcontextprotocol/server-puppeteer is dead/deprecated, do not use it). --isolated keeps the browser profile in-memory only (no persistent user-data-dir). --executable-path points at the system's installed google-chrome so this server doesn't try to download its own Chromium. Same y/n-per-call confirmation model as every other tool in llmcli.py --tools.",
-      "command": "/home/mateo/local-llm/.tools/node22/bin/node",
+      "description": "File read/write/search rooted at the home directory (covers the synced Dropbox folders too). Official @modelcontextprotocol/server-filesystem, cut from 16 tools to the 8 that matter.",
+      "command": "npx",
       "args": [
-        "/home/mateo/local-llm/.tools/node22/lib/node_modules/npm/bin/npx-cli.js",
         "-y",
-        "@playwright/mcp",
+        "@modelcontextprotocol/server-filesystem",
+        "${HOME}"
+      ],
+      "tools": {
+        "read_text_file": {},
+        "write_file": {},
+        "edit_file": {},
+        "list_directory": {},
+        "search_files": {},
+        "create_directory": {},
+        "move_file": {},
+        "get_file_info": {}
+      }
+    },
+    "system": {
+      "enabled": true,
+      "description": "OS and network inspection: system_info, list_processes, network_info, http_probe. 4 tools.",
+      "command": "uv",
+      "args": [
+        "run",
+        "--script",
+        "${CLI_DIR}/local_mcp.py",
+        "system"
+      ]
+    },
+    "fetch": {
+      "enabled": true,
+      "description": "Fetch a web page as markdown. Official mcp-server-fetch. 1 tool.",
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ]
+    },
+    "github": {
+      "enabled": true,
+      "description": "GitHub through the already-logged-in gh CLI: gh(args). 1 tool. Chosen over the official github-mcp-server because that server's schema is 22 tools / ~7K tokens at its smallest read-only setting and 46 tools / ~13K tokens by default, which does not fit these models' contexts.",
+      "command": "uv",
+      "args": [
+        "run",
+        "--script",
+        "${CLI_DIR}/local_mcp.py",
+        "github"
+      ]
+    },
+    "claude": {
+      "enabled": true,
+      "description": "Escalation: ask_claude(question, context) asks Claude through the claude CLI's normal login, with all of Claude's tools disabled. Capped at 10 calls per session. Uses plan usage. Set ASK_CLAUDE_MODEL in env to change the model (default sonnet). 1 tool.",
+      "command": "uv",
+      "args": [
+        "run",
+        "--script",
+        "${CLI_DIR}/local_mcp.py",
+        "claude"
+      ]
+    },
+    "desktop": {
+      "enabled": true,
+      "description": "Desktop applications: open_path (xdg-open a file, folder or URL in its default app), notify (desktop notification). 2 tools.",
+      "command": "uv",
+      "args": [
+        "run",
+        "--script",
+        "${CLI_DIR}/local_mcp.py",
+        "desktop"
+      ]
+    },
+    "memory": {
+      "enabled": true,
+      "description": "Long-term memory across sessions: remember(title, content) writes a markdown note under ~/.local/share/local-llm/memory/notes; recall(query) returns matching notes plus related topics from the graphify knowledge graph built over them. The graph is rebuilt after each chat by the loaded model (local_mcp.py memory-sync, log in ~/.cache/local-llm/memory-sync.log). 2 tools.",
+      "command": "uv",
+      "args": [
+        "run",
+        "--script",
+        "${CLI_DIR}/local_mcp.py",
+        "memory"
+      ]
+    },
+    "dropbox": {
+      "enabled": true,
+      "description": "The locally synced Dropbox folders (~/*Dropbox*): dropbox_find, dropbox_recent, dropbox_status. Reading and writing the files themselves goes through filesystem. No share links: that needs a Dropbox API token. 3 tools.",
+      "command": "uv",
+      "args": [
+        "run",
+        "--script",
+        "${CLI_DIR}/local_mcp.py",
+        "dropbox"
+      ]
+    },
+    "toolsuite": {
+      "enabled": true,
+      "description": "~/toolsuite/hackstack: hackstack(command, args) runs the scope-gated hs-* wrappers, hackstack_targets lists allowed targets and usage. The wrappers refuse any target without a targets/*.env profile; this adds no bypass. 2 tools.",
+      "command": "uv",
+      "args": [
+        "run",
+        "--script",
+        "${CLI_DIR}/local_mcp.py",
+        "toolsuite"
+      ]
+    },
+    "browser": {
+      "enabled": false,
+      "disabledReason": "Opt-in because of schema size: add it for a session with --servers +browser.",
+      "description": "Headless browser automation through text page snapshots. Microsoft's official @playwright/mcp (version pinned so it matches the Chromium installed in ~/.cache/ms-playwright; after changing the version run `npx -y @playwright/mcp@<version> install-browser chrome-for-testing`). Cut from 25 tools to 9.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.85",
         "--headless",
         "--isolated",
-        "--executable-path",
-        "/usr/bin/google-chrome"
+        "--browser",
+        "chromium",
+        "--output-dir",
+        "${HOME}/.cache/local-llm/playwright"
       ],
-      "notes": [
-        "Same node22-direct-invocation pattern as the filesystem entry above, for the same reason.",
-        "This server's tool schema alone is ~24 tools / ~17.7KB (roughly 4400 tokens by a bytes/4 estimate). Combined with filesystem's ~14 tools, the merged schema measured ~6637 prompt tokens against a live qwen-next server. Re-enabled 2026-08-25 by raising qwen-next's GPU_CTX from 4096 to 8192 in bin/start-model.sh (see that file's qwen-next case) to fit the merged schema plus real conversation headroom. llmcli.py prints a startup warning if the merged schema looks too large for the connected model's actual context size (queried live from /slots). If you hit 'exceeds context size' errors again (e.g. running scout, which is still at a smaller GPU_CTX), disable one server here rather than running both against a small-context model, or raise that model's GPU_CTX/CTX if you have the VRAM/RAM to spare."
-      ]
+      "tools": {
+        "browser_navigate": {
+          "keep": [
+            "url"
+          ]
+        },
+        "browser_navigate_back": {},
+        "browser_snapshot": {
+          "keep": [],
+          "description": "Read the current page as a text tree. Each element has a ref like e12 to use as target in click and type."
+        },
+        "browser_click": {
+          "keep": [
+            "element",
+            "target"
+          ]
+        },
+        "browser_type": {
+          "keep": [
+            "element",
+            "target",
+            "text",
+            "submit"
+          ]
+        },
+        "browser_press_key": {
+          "keep": [
+            "key"
+          ]
+        },
+        "browser_select_option": {
+          "keep": [
+            "element",
+            "target",
+            "values"
+          ]
+        },
+        "browser_wait_for": {
+          "keep": [
+            "time",
+            "text"
+          ]
+        },
+        "browser_tabs": {
+          "keep": [
+            "action",
+            "index"
+          ]
+        }
+      }
+    },
+    "computer": {
+      "enabled": false,
+      "disabledReason": "Opt-in because of schema size and because it acts on the live desktop: add it for a session with --servers +computer.",
+      "description": "Desktop computer use through the accessibility tree (no screenshots, so text-only models can use it): cua-driver's MCP server, cut from 60 tools to 5. Verified on this GNOME Wayland session: launch an app, read its controls as text, click a control, set a text box's value. Keyboard input (type_text, press_key, hotkey) is refused by cua-driver 0.28 on GNOME Wayland, so it is left out; text entry is set_value. Apps that expose no accessibility tree cannot be driven.",
+      "command": "cua-driver",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "CUA_DRIVER_RS_ENABLE_WAYLAND": "1"
+      },
+      "tools": {
+        "launch_app": {
+          "keep": [
+            "name",
+            "urls"
+          ],
+          "description": "Launch a desktop app by name or command. Returns its pid."
+        },
+        "list_windows": {
+          "keep": [
+            "pid"
+          ],
+          "description": "List open windows: window id (xid), owner pid, title."
+        },
+        "get_window_state": {
+          "keep": [
+            "pid",
+            "window_id",
+            "query",
+            "max_elements"
+          ],
+          "set": {
+            "include_screenshot": false
+          },
+          "append": [
+            "snapshot_id"
+          ],
+          "squeeze_indent": true,
+          "description": "Read a window's controls as an indexed text tree: [index] role \"label\". Also returns the snapshot_id that click and set_value need. Use query to show only controls containing some text."
+        },
+        "click": {
+          "keep": [
+            "pid",
+            "window_id",
+            "element_index",
+            "snapshot_id"
+          ],
+          "description": "Click a control by its element_index from the latest get_window_state, passing that result's snapshot_id."
+        },
+        "set_value": {
+          "keep": [
+            "pid",
+            "window_id",
+            "element_index",
+            "snapshot_id",
+            "value"
+          ],
+          "description": "Put text into a text box by element_index and snapshot_id. This is how to type; there is no keyboard tool."
+        }
+      }
     },
     "google-drive": {
       "enabled": false,
       "disabledReason": "No Google OAuth credentials yet. This entry is a scaffold only - see setupDoc for the one-time setup (creates a NEW Google Cloud project, separate from any K&S business project) that the user must do interactively (it requires their own Google login). Once cli/google_credentials.json exists and first-run auth has been completed, flip this to true.",
-      "description": "Google Drive + Docs + Sheets + Slides + Calendar, via @piotr-agier/google-drive-mcp (npx-launched Node MCP server, stdio transport). Same y/n-per-call confirmation model as read_file/run_shell in llmcli.py --tools - broad capability, not blind autonomy.",
+      "description": "Google Drive + Docs + Sheets + Slides + Calendar, via @piotr-agier/google-drive-mcp.",
       "command": "npx",
-      "args": ["-y", "@piotr-agier/google-drive-mcp"],
+      "args": [
+        "-y",
+        "@piotr-agier/google-drive-mcp"
+      ],
       "env": {
-        "GOOGLE_DRIVE_OAUTH_CREDENTIALS": "/home/mateo/local-llm/cli/google_credentials.json"
+        "GOOGLE_DRIVE_OAUTH_CREDENTIALS": "${CLI_DIR}/google_credentials.json"
       },
-      "credentialsPath": "/home/mateo/local-llm/cli/google_credentials.json",
+      "credentialsPath": "cli/google_credentials.json",
       "setupDoc": "docs/GOOGLE_SETUP.md",
       "firstRunAuthCommand": "npx -y @piotr-agier/google-drive-mcp auth",
       "notes": [
-        "System Node (/usr/bin/node) on this machine is v12 (EOL, apt) and cannot run this server - it uses ES2022 top-level await and dies with 'SyntaxError: Unexpected reserved word'. A modern Node 22 LTS is already downloaded standalone (no sudo) to /home/mateo/local-llm/.tools/node22/. Whatever launches this 'npx' command (this client, or the user running the auth command by hand) needs that node22/bin ahead of system node on PATH. See cli/mcp_smoke_test.py for the exact, already-proven-working invocation pattern (it hardcodes the node22 paths and explains why 'env node' re-resolution defeats a naive fix) - reuse that pattern here rather than re-deriving it.",
         "The token cache (tokens.json) is left at the server's own default (~/.config/google-drive-mcp/tokens.json), outside this repo - only the OAuth client credentials file lives at credentialsPath above, and only that path needs to be gitignored."
       ]
     }

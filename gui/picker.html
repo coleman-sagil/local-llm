@@ -495,6 +495,72 @@
         </div>
       </div>
 
+      <div class="card">
+        <span class="tag">Dense &middot; 7B</span>
+        <h3>Qwen2.5-7B-Instruct</h3>
+        <p class="desc">Qwen2.5-7B-Instruct-Q4_K_M &middot; full GPU &middot; port 8093</p>
+        <button class="launch" data-model="qwen2.5">Launch Qwen2.5</button>
+        <div class="status" id="status-qwen2.5"></div>
+        <div class="fallback">
+          <pre class="cmd">./gui/launch.sh qwen2.5</pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="tag">Security</span>
+        <h3>WhiteRabbitNeo-V3-7B</h3>
+        <p class="desc">Llama-3.1-8B based security specialist &middot; full GPU &middot; port 8094</p>
+        <button class="launch" data-model="wrn">Launch WRN</button>
+        <div class="status" id="status-wrn"></div>
+        <div class="fallback">
+          <pre class="cmd">./gui/launch.sh wrn</pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="tag">Hybrid SSM &middot; 27B</span>
+        <h3>Qwen3.8-27B Uncensored</h3>
+        <p class="desc">Qwen3.5 hybrid attention-SSM, 65 layers, partial GPU offload &middot; port 8095</p>
+        <button class="launch" data-model="qwen35">Launch Qwen3.5-27B</button>
+        <div class="status" id="status-qwen35"></div>
+        <div class="fallback">
+          <pre class="cmd">./gui/launch.sh qwen35</pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="tag">Reasoning &middot; 9B</span>
+        <h3>Qwythos-9B</h3>
+        <p class="desc">Claude-Mythos finetune, thinks before answering &middot; full GPU, 16K context &middot; port 8098</p>
+        <button class="launch" data-model="qwythos">Launch Qwythos</button>
+        <div class="status" id="status-qwythos"></div>
+        <div class="fallback">
+          <pre class="cmd">./gui/launch.sh qwythos</pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="tag">Gemma-4 &middot; E4B</span>
+        <h3>Bolt (Gemma-4 E4B Uncensored)</h3>
+        <p class="desc">Largest context of the local models &middot; full GPU, 64K context &middot; port 8096</p>
+        <button class="launch" data-model="bolt">Launch Bolt</button>
+        <div class="status" id="status-bolt"></div>
+        <div class="fallback">
+          <pre class="cmd">./gui/launch.sh bolt</pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="tag">Hybrid SSM &middot; 4B</span>
+        <h3>Nemotron3 Nano 4B Uncensored</h3>
+        <p class="desc">Smallest and quickest to load &middot; full GPU, 32K context &middot; port 8097</p>
+        <button class="launch" data-model="nano">Launch Nano</button>
+        <div class="status" id="status-nano"></div>
+        <div class="fallback">
+          <pre class="cmd">./gui/launch.sh nano</pre>
+        </div>
+      </div>
+
     </div>
   </section>
 
@@ -576,6 +642,27 @@ cd local-llm</pre>
             <td><a href="https://huggingface.co/unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF" target="_blank" rel="noopener">unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF</a></td>
             <td>1</td>
             <td>~42.9&nbsp;GiB</td>
+          </tr>
+          <tr>
+            <td>Qwen2.5-7B-Instruct</td>
+            <td class="mono">Q4_K_M</td>
+            <td>&mdash;</td>
+            <td>1</td>
+            <td>~4.4&nbsp;GiB</td>
+          </tr>
+          <tr>
+            <td>WhiteRabbitNeo-V3-7B</td>
+            <td class="mono">Q4_K_M</td>
+            <td>&mdash;</td>
+            <td>1</td>
+            <td>~4.4&nbsp;GiB</td>
+          </tr>
+          <tr>
+            <td>Qwen3.8-27B-Uncensored (HauhauCS)</td>
+            <td class="mono">Q4_K_P</td>
+            <td>&mdash;</td>
+            <td>1</td>
+            <td>~17.9&nbsp;GiB</td>
           </tr>
         </tbody>
       </table>

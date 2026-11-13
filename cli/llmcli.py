@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["requests", "mcp>=2,<3"]
+# ///
 """
 llmcli.py - a small, hackable REPL for chatting with locally-served LLMs
 via llama.cpp's OpenAI-compatible /v1/chat/completions endpoint.
@@ -10,15 +14,20 @@ Core design goals (read this before you "improve" it):
     bolted on the side. See the big comment block above run_tools_repl() for
     why it behaves differently (non-streaming, confirm-before-execute, etc).
 
-Usage:
-    python3 llmcli.py --model scout
-    python3 llmcli.py --model qwen --tools
+Usage (uv reads the dependency header above; no venv or pip needed):
+    uv run cli/llmcli.py --model qwythos
+    uv run cli/llmcli.py --model bolt --tools
+    uv run cli/llmcli.py --model nano --tools --servers terminal,filesystem
 
 Fixed port contract (do not change without updating bin/start-model.sh too):
-    scout      -> http://127.0.0.1:8090   (Llama-4-Scout, general-purpose)
     qwen       -> http://127.0.0.1:8091   (Qwen3-Coder-Next, coding specialist)
-    qwen-next  -> http://127.0.0.1:8092   (Qwen3-Next-80B-A3B-Instruct, general-purpose
-                                            sibling of qwen - same architecture/backbone)
+    qwen-next  -> http://127.0.0.1:8092   (Qwen3-Next-80B-A3B-Instruct)
+    qwen2.5    -> http://127.0.0.1:8093   (Qwen2.5-7B-Instruct)
+    wrn        -> http://127.0.0.1:8094   (WhiteRabbitNeo-V3-7B)
+    qwen35     -> http://127.0.0.1:8095   (Qwen3.8-27B uncensored, partial GPU offload)
+    bolt       -> http://127.0.0.1:8096   (Gemma-4-E4B uncensored)
+    nano       -> http://127.0.0.1:8097   (Nemotron3-Nano-4B uncensored)
+    qwythos    -> http://127.0.0.1:8098   (Qwythos-9B, reasoning model)
 """
 
 import argparse
@@ -26,6 +35,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import string
 import subprocess
 import sys
@@ -34,9 +44,14 @@ from pathlib import Path
 import requests
 
 MODEL_PORTS = {
-    "scout": 8090,
     "qwen": 8091,
     "qwen-next": 8092,
+    "qwen2.5": 8093,
+    "wrn": 8094,
+    "qwen35": 8095,
+    "bolt": 8096,
+    "nano": 8097,
+    "qwythos": 8098,
 }
 
 REQUEST_TIMEOUT_CONNECT = 5  # seconds, just for the initial reachability probe
@@ -174,21 +189,16 @@ def run_chat_repl(model: str) -> None:
 # layer is a minimal demonstration, not a hardened agent framework.
 #
 # Architecture (real MCP client, not hardcoded tools):
-#   - Tools come from two sources: a tiny always-on "builtin" source (just
-#     run_shell - no MCP server here does arbitrary shell execution, so it
-#     stays a hardcoded local tool) and zero or more MCP servers configured
-#     in mcp_servers.json (stdio transport, via the `mcp` SDK). The old
-#     hardcoded read_file is GONE - the filesystem MCP server's own
-#     read_file/read_text_file/etc. replace it, sandboxed to whatever root
-#     that server is configured with (see mcp_servers.json).
-#   - Every tool, from every source, is exposed to the model under a
-#     namespaced name: "{source}__{original_name}", e.g. "builtin__run_shell",
-#     "filesystem__read_file", "playwright__browser_navigate". This is a
-#     hard requirement, not cosmetic: the filesystem MCP server itself
-#     exposes a tool literally named "read_file", which would silently
-#     collide with the old builtin of the same name if both were ever
-#     un-namespaced at once. One dispatch table, one namespacing rule, no
-#     per-source special-casing.
+#   - Every tool comes from an MCP server configured in mcp_servers.json
+#     (stdio transport, via the `mcp` SDK). There are no hardcoded tools:
+#     shell access is the "terminal" server in cli/local_mcp.py, which also
+#     provides the system, github, claude (escalation) and desktop servers.
+#     --servers a,b,c picks a subset for one session.
+#   - Every tool is exposed to the model under a namespaced name:
+#     "{server}__{original_name}", e.g. "terminal__run_command",
+#     "filesystem__read_file". This is a hard requirement, not cosmetic: two
+#     servers can expose tools with the same name. One dispatch table, one
+#     namespacing rule, no per-server special-casing.
 #   - On startup, every *enabled* server in mcp_servers.json is connected
 #     with a bounded timeout. A server that's configured but unreachable
 #     (bad path, no credentials yet, hangs on init - e.g. the google-drive
@@ -203,7 +213,7 @@ def run_chat_repl(model: str) -> None:
 #     incrementally-streamed tool_call argument fragments is finicky and
 #     not worth the complexity for a best-effort demo layer.
 #   - Every single tool call is confirmed with the user (y/n) before it is
-#     ever executed - MCP-routed or builtin, no exceptions, no auto-execute
+#     ever executed - no exceptions, no auto-execute
 #     path. This is the actual safety boundary (these tools read/write
 #     arbitrary files under the configured root and drive a real unsandboxed
 #     browser) and it is not up for negotiation by a future edit.
@@ -217,49 +227,32 @@ def run_chat_repl(model: str) -> None:
 #     conversation). See the startup warning below and docs/TUTORIAL.md.
 # ---------------------------------------------------------------------------
 
-# Machine-level Node 22 toolchain (downloaded standalone, no sudo, gitignored
-# - see cli/mcp_smoke_test.py for the full story). Hardcoded as an absolute
-# path on purpose: it's tied to this machine, not to any particular git
-# worktree/branch checkout of this repo, so every entry-point that needs it
-# (this file, mcp_smoke_test.py) should resolve it the same fixed way.
-NODE22_BIN_DIR = "/home/mateo/local-llm/.tools/node22/bin"
-
-MCP_SERVERS_CONFIG_PATH = Path(__file__).resolve().parent / "mcp_servers.json"
-MCP_CONNECT_TIMEOUT_S = 30  # generous: first npx run per package can cold-check its cache
-
-BUILTIN_SOURCE = "builtin"
-
-BUILTIN_TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": f"{BUILTIN_SOURCE}__run_shell",
-            "description": "Run a shell command on the local machine and return its stdout/stderr.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The shell command to execute.",
-                    },
-                },
-                "required": ["command"],
-            },
-        },
-    },
-]
-BUILTIN_DISPATCH = {f"{BUILTIN_SOURCE}__run_shell": (BUILTIN_SOURCE, "run_shell")}
+CLI_DIR = Path(__file__).resolve().parent
+MCP_SERVERS_CONFIG_PATH = CLI_DIR / "mcp_servers.json"
+MCP_CONNECT_TIMEOUT_S = 30  # generous: first npx/uvx run per package can cold-check its cache
 
 TOOLS_SYSTEM_PROMPT = (
-    "You are a helpful local assistant. You have optional access to tools - "
-    "always a local run_shell, plus whatever MCP servers are currently "
-    "connected (e.g. filesystem access, browser automation). Only call a "
-    "tool when it is actually necessary to answer the user; every tool call "
-    "requires the user's manual approval before it runs, so don't call "
-    "tools speculatively."
+    "You are a helpful assistant running on the user's own Linux machine, "
+    "with tools for the shell, files, the system, the network and more. "
+    "Call a tool only when it is needed to answer; every tool call needs the "
+    "user's manual approval before it runs, so don't call tools "
+    "speculatively. If a problem is beyond you and an ask_claude tool is "
+    "available, use it rather than guessing. If memory tools are available, "
+    "use recall when the user refers to earlier sessions or to something you "
+    "do not know about them, and use remember to save durable facts worth "
+    "keeping."
 )
 
-MAX_TOOL_ROUNDS = 8
+# MCP servers write their own logging to stderr (npm notices, driver warnings).
+# It goes here instead of into the middle of the conversation.
+MCP_SERVER_LOG = Path.home() / ".cache" / "local-llm" / "mcp-servers.log"
+
+# Browser and desktop tasks are a chain of small steps (look, act, look again).
+MAX_TOOL_ROUNDS = 20
+# A single tool result bigger than this is cut (head + tail kept) before it goes
+# back to the model: one unbounded file read or web page would otherwise fill
+# the whole context window of these models.
+MAX_TOOL_RESULT_CHARS = 8000
 
 
 def confirm(prompt: str) -> bool:
@@ -270,21 +263,24 @@ def confirm(prompt: str) -> bool:
     return answer in ("y", "yes")
 
 
-def load_mcp_server_configs(path: Path = MCP_SERVERS_CONFIG_PATH) -> list[dict]:
-    """Load the *enabled* servers from mcp_servers.json as a list of dicts
-    with keys: name, command, args, env.
+def load_mcp_server_configs(only: list[str] | None = None,
+                            path: Path = MCP_SERVERS_CONFIG_PATH) -> list[dict]:
+    """Load servers from mcp_servers.json as a list of dicts with keys:
+    name, command, args, env.
 
-    Every server's env is built as: full inherited os.environ, with node22's
-    bin dir forced onto the front of PATH, then the entry's own "env" block
-    (if any) layered on top with ${VAR}-style substitution against the
-    current environment. Forcing node22-first PATH centrally (rather than
-    trusting each entry to do it) matters because at least one entry in this
-    file (google-drive) launches bare "npx" rather than an absolute node22
-    binary; this puts node22 first on PATH for anything that entry (or a
-    future one) spawns via bare command-name resolution. The entries this
-    file actually enables by default (filesystem, playwright) sidestep the
-    question entirely by invoking the node22 binary directly by absolute
-    path - see their "notes" in mcp_servers.json.
+    With only=None this is every *enabled* server. With only=[names] it is
+    exactly those servers, enabled or not (naming a server is an explicit
+    request for it); names written "+name" are added to the enabled set
+    instead of replacing it. An unknown name is a fatal error rather than a
+    silent skip, so a typo can't quietly leave the model without a tool.
+
+    An entry's optional "tools" map is passed through as cfg["tools"]; see
+    build_tool_schemas for what it does.
+
+    ${VAR}-style references in command, args and env values are substituted
+    from the current environment plus CLI_DIR (this file's directory), so the
+    config holds no machine-specific absolute paths. Each server inherits the
+    full os.environ with the entry's own "env" block layered on top.
     """
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -296,19 +292,38 @@ def load_mcp_server_configs(path: Path = MCP_SERVERS_CONFIG_PATH) -> list[dict]:
         print(f"Warning: {path} is not valid JSON ({exc}); running with zero MCP servers.", file=sys.stderr)
         return []
 
+    servers = data.get("servers", {})
+    enabled = [name for name, entry in servers.items() if entry.get("enabled", False)]
+    if only is None:
+        names = enabled
+    else:
+        extra = [name[1:] for name in only if name.startswith("+")]
+        exact = [name for name in only if not name.startswith("+")]
+        unknown = [name for name in extra + exact if name not in servers]
+        if unknown:
+            print(f"Error: unknown MCP server(s) {', '.join(unknown)}. "
+                  f"Configured in {path.name}: {', '.join(servers)}", file=sys.stderr)
+            sys.exit(1)
+        names = exact + [name for name in (enabled if extra else []) + extra if name not in exact]
+        names = list(dict.fromkeys(names))
+
+    variables = {**os.environ, "CLI_DIR": str(CLI_DIR)}
+
+    def substitute(value):
+        return string.Template(value).safe_substitute(variables) if isinstance(value, str) else value
+
     configs = []
-    for name, entry in data.get("servers", {}).items():
-        if not entry.get("enabled", False):
-            continue
+    for name in names:
+        entry = servers[name]
         env = {**os.environ}
-        env["PATH"] = f"{NODE22_BIN_DIR}:{os.environ.get('PATH', '')}"
         for key, value in (entry.get("env") or {}).items():
-            env[key] = string.Template(value).safe_substitute(os.environ) if isinstance(value, str) else value
+            env[key] = substitute(value)
         configs.append({
             "name": name,
-            "command": entry["command"],
-            "args": entry.get("args", []),
+            "command": substitute(entry["command"]),
+            "args": [substitute(arg) for arg in entry.get("args", [])],
             "env": env,
+            "tools": entry.get("tools"),
         })
     return configs
 
@@ -344,7 +359,9 @@ async def _connect_one_server(cfg: dict, stack: "contextlib.AsyncExitStack"):
     from mcp.client.stdio import stdio_client
 
     params = StdioServerParameters(command=cfg["command"], args=cfg["args"], env=cfg["env"])
-    read, write = await stack.enter_async_context(stdio_client(params))
+    MCP_SERVER_LOG.parent.mkdir(parents=True, exist_ok=True)
+    errlog = stack.enter_context(open(MCP_SERVER_LOG, "a", encoding="utf-8"))
+    read, write = await stack.enter_async_context(stdio_client(params, errlog=errlog))
     session = await stack.enter_async_context(ClientSession(read, write))
     with anyio.fail_after(MCP_CONNECT_TIMEOUT_S):
         await session.initialize()
@@ -373,60 +390,85 @@ async def connect_configured_servers(configs: list[dict], stack: "contextlib.Asy
     return sessions, tools_by_server
 
 
-def build_tool_schemas(tools_by_server: dict) -> tuple[list[dict], dict]:
-    """Merge builtin + every connected MCP server's tools into one OpenAI-
-    style tool schema list, namespaced as "{server}__{tool}". Returns
-    (schemas, dispatch) where dispatch maps namespaced name -> (server, original_name)."""
-    schemas = list(BUILTIN_TOOL_SCHEMAS)
-    dispatch = dict(BUILTIN_DISPATCH)
+SLIM_TOOL_DESCRIPTION_CHARS = 240
+SLIM_PARAM_DESCRIPTION_CHARS = 120
+
+
+def _slim_schema(tool, rule: dict) -> tuple[str, dict]:
+    """Cut one tool's schema down to the parameters named in rule["keep"],
+    with descriptions shortened. Big third-party servers describe every tool
+    for a frontier model with a huge context; these models need the short
+    version."""
+    schema = tool.input_schema or {"type": "object", "properties": {}}
+    keep = rule.get("keep")
+    properties = {}
+    for name, spec in (schema.get("properties") or {}).items():
+        if keep is not None and name not in keep:
+            continue
+        spec = dict(spec) if isinstance(spec, dict) else {}
+        if isinstance(spec.get("description"), str):
+            spec["description"] = spec["description"][:SLIM_PARAM_DESCRIPTION_CHARS]
+        properties[name] = spec
+    slim = {"type": "object", "properties": properties,
+            "required": [name for name in schema.get("required") or [] if name in properties]}
+    description = rule.get("description") or (tool.description or "")[:SLIM_TOOL_DESCRIPTION_CHARS]
+    return description, slim
+
+
+def build_tool_schemas(tools_by_server: dict, filters: dict | None = None) -> tuple[list[dict], dict]:
+    """Merge every connected MCP server's tools into one OpenAI-style tool
+    schema list, namespaced as "{server}__{tool}". Returns (schemas, dispatch)
+    where dispatch maps namespaced name -> (server, original_name, forced_args).
+
+    filters maps a server name to that server's "tools" map from
+    mcp_servers.json. A server with such a map exposes ONLY the tools named in
+    it, each slimmed by its rule: {"keep": [params shown to the model],
+    "set": {param: value forced on every call}, "description": override,
+    "append": [structured-result fields to add to the text result],
+    "squeeze_indent": bool}. A server with no map exposes everything unchanged."""
+    schemas = []
+    dispatch = {}
     for server_name, tools in tools_by_server.items():
+        rules = (filters or {}).get(server_name)
         for tool in tools:
+            if rules is not None and tool.name not in rules:
+                continue
+            rule = (rules or {}).get(tool.name) or {}
+            if rules is None:
+                description = tool.description or ""
+                parameters = tool.input_schema or {"type": "object", "properties": {}}
+            else:
+                description, parameters = _slim_schema(tool, rule)
             namespaced = f"{server_name}__{tool.name}"
             schemas.append({
                 "type": "function",
-                "function": {
-                    "name": namespaced,
-                    "description": tool.description or "",
-                    "parameters": tool.inputSchema or {"type": "object", "properties": {}},
-                },
+                "function": {"name": namespaced, "description": description, "parameters": parameters},
             })
-            dispatch[namespaced] = (server_name, tool.name)
+            dispatch[namespaced] = (server_name, tool.name, rule)
     return schemas, dispatch
 
 
-def _run_shell(args: dict) -> str:
-    command = args.get("command", "")
-    try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60)
-        output = result.stdout
-        if result.stderr:
-            output += f"\n[stderr]\n{result.stderr}"
-        output += f"\n[exit code: {result.returncode}]"
-        return output
-    except subprocess.TimeoutExpired:
-        return "Error: command timed out after 60s."
-    except OSError as exc:
-        return f"Error running command: {exc}"
+def clip_tool_result(text: str) -> str:
+    if len(text) <= MAX_TOOL_RESULT_CHARS:
+        return text
+    half = MAX_TOOL_RESULT_CHARS // 2
+    cut = len(text) - MAX_TOOL_RESULT_CHARS
+    return f"{text[:half]}\n[... {cut} chars truncated by the client ...]\n{text[-half:]}"
 
 
 async def execute_tool(name: str, args: dict, dispatch: dict, sessions: dict) -> str:
-    """Execute a tool call after user confirmation, routing it to the
-    correct source (builtin, or the right MCP server session). Always
-    returns a string (even on error/refusal) so it can go straight back to
-    the model as the tool result content."""
+    """Execute a tool call after user confirmation, routing it to the right
+    MCP server session. Always returns a string (even on error/refusal) so
+    it can go straight back to the model as the tool result content."""
     entry = dispatch.get(name)
     if entry is None:
         return f"Error: unknown tool '{name}'."
-    source, original_name = entry
+    source, original_name, rule = entry
+    args = {**args, **(rule.get("set") or {})}
 
     args_str = ", ".join(f"{k}={v!r}" for k, v in args.items())
     if not confirm(f"  Model wants to call {source}.{original_name}({args_str}). Allow?"):
         return "User denied this tool call."
-
-    if source == BUILTIN_SOURCE:
-        if original_name == "run_shell":
-            return _run_shell(args)
-        return f"Error: unknown builtin tool '{original_name}'."
 
     session = sessions.get(source)
     if session is None:
@@ -436,7 +478,23 @@ async def execute_tool(name: str, args: dict, dispatch: dict, sessions: dict) ->
     except Exception as exc:
         return f"Error calling {source}.{original_name}: {exc}"
     text = _text_of(result.content)
-    return f"[tool error] {text}" if result.isError else text
+    if rule.get("squeeze_indent"):
+        # Accessibility trees nest 30+ spaces deep; keep the nesting visible at a sixth of the cost.
+        text = re.sub(r"^ +", lambda m: " " * (len(m.group(0)) // 6), text, flags=re.M)
+    structured = getattr(result, "structured_content", None) or {}
+    for field in rule.get("append") or []:
+        if field in structured:
+            # Some servers return ids only in structuredContent; the model sees only text.
+            text = f"{field}={structured[field]}\n{text}"
+    text = clip_tool_result(text)
+    return f"[tool error] {text}" if result.is_error else text
+
+
+def start_memory_sync(base_url: str) -> None:
+    """Detached `local_mcp.py memory-sync`: a no-op unless a note is newer than the graph."""
+    log = open(MCP_SERVER_LOG.with_name("memory-sync.log"), "a", encoding="utf-8")
+    subprocess.Popen(["uv", "run", "-q", "--script", str(CLI_DIR / "local_mcp.py"), "memory-sync", base_url],
+                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
 
 
 def chat_once_with_tools(base_url: str, messages: list, tool_schemas: list) -> dict:
@@ -480,8 +538,8 @@ def warn_if_schema_too_big(base_url: str, tool_schemas: list) -> None:
             f"Warning: the merged tool schema is an estimated ~{estimated_tokens} tokens, "
             f"which already meets or exceeds this server's context size ({n_ctx} tokens) - "
             "on its own, before any conversation. Expect 'exceeds context size' errors on "
-            "the first message. Disable an MCP server in cli/mcp_servers.json (playwright is "
-            "the biggest single contributor) or raise GPU_CTX/CTX in bin/start-model.sh.",
+            "the first message. Pass a smaller set with --servers (filesystem and playwright "
+            "are the biggest contributors) or raise GPU_CTX/CTX in bin/start-model.sh.",
             file=sys.stderr,
         )
     elif estimated_tokens >= n_ctx * 0.7:
@@ -492,7 +550,7 @@ def warn_if_schema_too_big(base_url: str, tool_schemas: list) -> None:
         )
 
 
-async def run_tools_repl(model: str) -> None:
+async def run_tools_repl(model: str, only: list[str] | None = None) -> None:
     base_url = base_url_for(model)
 
     if not server_reachable(base_url):
@@ -503,16 +561,22 @@ async def run_tools_repl(model: str) -> None:
         import mcp  # noqa: F401 (import-guard only; real imports happen where used)
     except ImportError:
         print(
-            "Error: --tools mode requires the `mcp` package (pip install --user mcp).",
+            "Error: --tools mode requires the `mcp` package. Run this script with uv, which "
+            "installs it from the header: uv run cli/llmcli.py --model <name> --tools",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    configs = load_mcp_server_configs()
+    configs = load_mcp_server_configs(only)
     async with contextlib.AsyncExitStack() as stack:
         sessions, tools_by_server = await connect_configured_servers(configs, stack)
-        tool_schemas, dispatch = build_tool_schemas(tools_by_server)
+        filters = {cfg["name"]: cfg["tools"] for cfg in configs if cfg.get("tools") is not None}
+        tool_schemas, dispatch = build_tool_schemas(tools_by_server, filters)
         warn_if_schema_too_big(base_url, tool_schemas)
+        if "memory" in sessions:
+            # Notes saved this session get indexed into the graphify memory graph
+            # after the chat, by the model that is still loaded and now idle.
+            stack.callback(start_memory_sync, base_url)
 
         print(
             f"Connected to {model} at {base_url} [EXPERIMENTAL tools mode].\n"
@@ -601,14 +665,25 @@ def main() -> None:
         "--tools",
         action="store_true",
         help=(
-            "EXPERIMENTAL: enable best-effort MCP-backed tool-calling (builtin run_shell "
-            "plus every enabled server in cli/mcp_servers.json) with y/n confirmation per call."
+            "EXPERIMENTAL: enable best-effort MCP-backed tool-calling (every enabled "
+            "server in cli/mcp_servers.json) with y/n confirmation per call."
+        ),
+    )
+    parser.add_argument(
+        "--servers",
+        metavar="A,B,C",
+        help=(
+            "With --tools: use exactly these servers from cli/mcp_servers.json instead of "
+            "every enabled one. Fewer servers means a smaller tool schema and more context "
+            "left for the conversation. Write +name to add a disabled server to the enabled "
+            "set instead, e.g. --servers +browser,+computer."
         ),
     )
     args = parser.parse_args()
 
     if args.tools:
-        asyncio.run(run_tools_repl(args.model))
+        only = [name.strip() for name in args.servers.split(",") if name.strip()] if args.servers else None
+        asyncio.run(run_tools_repl(args.model, only))
     else:
         run_chat_repl(args.model)
 

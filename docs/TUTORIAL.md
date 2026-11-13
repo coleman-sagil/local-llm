@@ -201,116 +201,138 @@ Under the hood this is exactly the shape described in section 1: it POSTs to
 `/v1/chat/completions` with `"stream": true`, reads the response as
 server-sent events, and prints each chunk's text as it arrives.
 
-### The `--tools` layer: a real MCP client, honest status
+### The `--tools` layer: a real MCP client
 
 ```bash
-python3 cli/llmcli.py --model qwen --tools
+uv run cli/llmcli.py --model bolt --tools
+uv run cli/llmcli.py --model nano --tools --servers terminal,filesystem
 ```
 
-This is still an experimental, opt-in layer bolted onto the side of the CLI,
-kept deliberately separate from the core chat path (non-streaming, clearly
-commented in the source as best-effort). What changed: it used to wire up
-exactly two hardcoded tools (`read_file`, `run_shell`); it now runs a real
-[MCP](https://modelcontextprotocol.io/) client. On startup it reads
-`cli/mcp_servers.json`, connects (stdio transport, via the Python `mcp` SDK)
-to every server listed there with `"enabled": true`, calls `list_tools()` on
-each, and merges the results into the single tool schema sent to the model.
+`uv` reads the dependency header at the top of `llmcli.py` (`requests`, `mcp`),
+so there is no venv to manage. From fish, `llama-agent <model>` loads the
+model (via `llama-swap`) and starts this in one step.
 
-**Where the tools come from.** Two sources: a tiny always-on `builtin`
-source (just `run_shell` — no configured MCP server does arbitrary shell
-execution, so that one stays a hardcoded local tool), and whatever MCP
-servers are enabled in `mcp_servers.json`. The old hardcoded `read_file` is
-gone entirely — the `filesystem` MCP server's own `read_file` (plus
-`read_text_file`, `write_file`, `search_files`, `directory_tree`, and nine
-more) replace it, sandboxed to whatever root that server is configured with.
-Every tool the model sees is namespaced `{source}__{original_name}` — e.g.
-`builtin__run_shell`, `filesystem__read_file`, `playwright__browser_navigate`
-— which is load-bearing, not cosmetic: the filesystem server itself exposes
-a tool literally named `read_file`, and it would silently collide with the
-old hardcoded one if both were ever un-namespaced at once.
+This is an opt-in layer kept separate from the core chat path (non-streaming,
+best-effort). On startup it reads `cli/mcp_servers.json`, connects over stdio
+to every server with `"enabled": true` (or exactly the ones named in
+`--servers a,b,c`), calls `list_tools()` on each, and merges the results into
+the single tool schema sent to the model. Every tool the model sees is
+namespaced `{server}__{tool}`, e.g. `terminal__run_command`,
+`filesystem__read_file`.
 
-**What's configured by default**, per an explicit standing decision to make
-this broad rather than narrowly scoped, with the y/n confirmation gate doing
-the actual safety work instead of a locked-down allowlist:
+**What's configured.** There are no hardcoded tools any more: the old builtin
+`run_shell` is now the `terminal` server.
 
-- `filesystem` — [`@modelcontextprotocol/server-filesystem`](https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem),
-  rooted at `/home/mateo` (broad on purpose — this also covers the synced
-  Kearney & O'Banion Dropbox folder for free, no separate Dropbox
-  integration needed).
-- `playwright` — [`@playwright/mcp`](https://www.npmjs.com/package/@playwright/mcp)
-  (Microsoft's official server; the older `@modelcontextprotocol/server-puppeteer`
-  is dead/deprecated — don't reach for it), headless, unrestricted, not
-  locked to any site.
-- `google-drive` — present but `"enabled": false`, a scaffold only until
-  OAuth credentials exist. See `docs/GOOGLE_SETUP.md`.
+| Server | Tools | Schema | What it is |
+|---|---|---|---|
+| `terminal` | `run_command` | ~120 tok | `bash -lc` with a timeout and truncated output |
+| `filesystem` | 8 | ~1,500 tok | official `@modelcontextprotocol/server-filesystem`, rooted at `$HOME`, cut from 16 tools |
+| `system` | `system_info`, `list_processes`, `network_info`, `http_probe` | ~310 tok | OS, GPU and network inspection |
+| `fetch` | `fetch` | ~360 tok | official `mcp-server-fetch`, a web page as markdown |
+| `github` | `gh` | ~90 tok | the already-logged-in `gh` CLI, argument list, no shell |
+| `claude` | `ask_claude` | ~110 tok | escalates a question to Claude (see below) |
+| `desktop` | `open_path`, `notify` | ~150 tok | `xdg-open` and `notify-send` |
+| `memory` | `remember`, `recall` | ~180 tok | long-term memory backed by graphify (see below) |
+| `dropbox` | `dropbox_find`, `dropbox_recent`, `dropbox_status` | ~270 tok | the locally synced `~/*Dropbox*` folders |
+| `toolsuite` | `hackstack`, `hackstack_targets` | ~190 tok | `~/toolsuite/hackstack`'s scope-gated `hs-*` wrappers |
+| `browser` | 9 | ~940 tok | opt-in: headless Chromium via `@playwright/mcp`, cut from 25 tools |
+| `computer` | 5 | ~770 tok | opt-in: desktop control via `cua-driver`, cut from 60 tools |
+| `google-drive` | | | disabled scaffold until OAuth exists, see `docs/GOOGLE_SETUP.md` |
 
-Both `filesystem` and `playwright` need a modern Node (the servers use
-ES2022 top-level await; system Node on this machine is v12 from apt, EOL,
-and dies with `SyntaxError: Unexpected reserved word`). A standalone Node 22
-LTS lives at `.tools/node22/` (downloaded without sudo, gitignored, tied to
-this machine rather than to any particular git checkout) — `mcp_servers.json`
-invokes it directly by absolute path rather than trusting a bare `npx` on
-`PATH` to resolve correctly; see the comments in `cli/llmcli.py` above
-`load_mcp_server_configs()` and in `cli/mcp_smoke_test.py` for the full
-story of why that distinction matters.
+The enabled set is about 3,300 tokens of schema. `browser` and `computer` are
+opt-in: `--servers +browser,+computer` adds them to the enabled set (about
+5,000 tokens together), while `--servers a,b` without a `+` uses exactly
+those.
 
-**Unreachable servers don't take the CLI down with them.** Each server gets
-a bounded connect attempt; if it fails to start, fails to authenticate, or
-just doesn't respond in time, `llmcli.py` prints one warning line naming it
-and moves on — the remaining servers (and the always-on `builtin` tool) are
-still usable. This is what lets `google-drive` sit in the config disabled,
-and what will let it fail gracefully the day it's flipped on before its
-first-run OAuth is actually done.
+`terminal`, `system`, `github`, `claude`, `desktop`, `memory`, `dropbox` and
+`toolsuite` are all one file, `cli/local_mcp.py <group>`, written against the
+official `mcp` Python SDK. They are ordinary stdio MCP servers, so any other
+MCP client can use them too. The official GitHub MCP server was measured and
+rejected for these models: 46 tools / ~13K tokens by default and 22 tools /
+~7K tokens at its smallest read-only setting, against one tool / ~90 tokens
+for `gh`.
 
-**The safety gate itself did not change.** Every tool call, from every
-source, still requires a manual y/n confirmation before it executes, with no
-auto-execute path — MCP-routed calls go through exactly the same `confirm()`
-prompt as the old hardcoded tools did. That gate is the real safety
-boundary, not a formality, since the filesystem server can read/write
-anything under its root and the playwright server drives a real, unsandboxed
-browser.
+**Cutting big servers down.** An entry's optional `"tools"` map in
+`mcp_servers.json` exposes only the tools it names, and for each one: `keep`
+lists the parameters the model sees, `set` forces arguments on every call,
+`description` replaces the text, `append` copies fields that a server returns
+only as structured data into the text result, and `squeeze_indent` shrinks
+deeply indented output. That is how `cua-driver`'s 60 tools / ~24K tokens
+became 5 tools / ~770 tokens.
 
-**An honest limitation found while wiring this up, not a bug in the code —
-a fact about these models:** the *merged tool schema itself* can be bigger
-than these models' context windows. `playwright` alone exposes ~24 tools and
-its schema is already an estimated ~4,400 tokens; combined with
-`filesystem`'s ~14 tools the merged schema measured **~6,637 prompt tokens**
-against the live `qwen-next` server (confirmed directly: `request (6637
-tokens) exceeds the available context size (4096 tokens)`) — over budget
-before a single word of conversation, on every model this project currently
-runs (`scout` at 2048 ctx, `qwen`/`qwen-next` at 4096 ctx; see `GPU_CTX`/
-`CTX` in `bin/start-model.sh`). `llmcli.py` now queries the connected
-server's real context size (`/slots`) at startup and prints a warning if the
-merged schema looks too big for it, so this shows up as a clear heads-up
-line instead of a confusing mid-conversation `exceeds context size` error.
-If you hit that, disable one server in `cli/mcp_servers.json` (`playwright`
-is the bigger single contributor) rather than running both against a
-small-context model, or raise `GPU_CTX`/`CTX` in `bin/start-model.sh` if you
-have the VRAM/RAM to spare.
+**`memory`.** `remember(title, content)` writes a markdown note to
+`~/.local/share/local-llm/memory/notes/`. `recall(query)` returns the best
+matching notes in full, plus related topics from a graphify knowledge graph
+built over the notes. The graph is rebuilt when a `--tools` session ends
+(`local_mcp.py memory-sync`, run detached, log in
+`~/.cache/local-llm/memory-sync.log`): graphify's semantic extraction runs
+against the model that is still loaded, which takes one to four minutes per
+new note. Recall does not wait for it, because it also reads the notes
+directly. The installed `graphify` lacks the `openai` client its
+OpenAI-compatible backend needs, so the sync runs the same version through
+`uvx --from "graphifyy[openai]==<installed version>"`.
 
-**What's verified and what isn't, plainly.** Verified end-to-end with real
-MCP servers (no LLM involved, so it isn't blocked by slow generation):
-config loading, connecting to `filesystem` and `playwright` and merging
-their 39 combined tools into one correctly-namespaced schema, graceful
-skip-with-warning of an unreachable server without taking down the others,
-the y/n confirm gate (both the deny path and the allow path actually
-executing a real MCP tool call), and — the specific scenario a recent fix
-(`52ea885`) targeted — that a tool-call failure on round 2+ of a turn rolls
-the conversation history back cleanly with no orphaned `tool_call_id`
-entries left for the next turn. Also verified: zero orphaned subprocesses
-after both a clean `/exit` and a mid-session Ctrl+C (the previous concern
-here — models not reliably producing structured `tool_calls` under CPU-only
-quantized inference — is unchanged and still applies; that's a model/sampler
-question, not something this refactor touches). What's **not** verified
-right now: a live model actually seeing the merged 39-tool schema and
-emitting a real `tool_calls` response against it. The only model server
-reachable while this was built was `qwen-next` on port 8092, which was
-running at a fraction of its normal speed (an unrelated stuck process the
-user was clearing separately) — at ~4 tokens/sec *prompt processing*, even
-the smallest reasonable schema would take several minutes just to ingest,
-before generating a single token. Once that's resolved (or in GPU-offload
-mode generally), it's worth an actual live `--tools` session to watch a real
-multi-round tool-calling exchange happen.
+**`computer`.** Text-only models cannot read screenshots, so this drives apps
+through the accessibility tree: `launch_app`, `list_windows`,
+`get_window_state` (controls as an indexed text tree), `click`, `set_value`.
+Verified on this GNOME Wayland session with the calculator: enter `6*7` with
+`set_value`, click `=`, read back `42`. Limits found here: `cua-driver` 0.28
+refuses keyboard input (`type_text`, `press_key`, `hotkey`) on GNOME Wayland,
+so those tools are left out and text entry is `set_value`; an app that
+exposes no accessibility tree cannot be driven; the Wayland backend is
+experimental and is switched on by `CUA_DRIVER_RS_ENABLE_WAYLAND=1` in the
+entry's `env`.
+
+**`browser`.** `@playwright/mcp` is pinned to a version whose Chromium is
+installed under `~/.cache/ms-playwright`. After changing the pin, run
+`npx -y @playwright/mcp@<version> install-browser chrome-for-testing`.
+
+Paths in `mcp_servers.json` use `${HOME}` and `${CLI_DIR}`, substituted by
+`llmcli.py`, so the file holds nothing machine-specific. Servers launch with
+the system `npx`/`uvx`/`uv`.
+
+**`ask_claude`.** Runs the `claude` CLI in print mode with every Claude tool,
+MCP server and customization disabled, so Claude can only answer in text. It
+starts from a clean environment (only `HOME` and `PATH`): `claude-local`
+exports `ANTHROPIC_BASE_URL` and related variables to point Claude Code at a
+local model, and inheriting them would make the tool ask the local model
+itself. Limits: 10 calls per session, 20,000 characters of question plus
+context, 180 s. It uses plan usage. `ASK_CLAUDE_MODEL` changes the model
+(default `sonnet`).
+
+**Unreachable servers don't take the CLI down with them.** Each server gets a
+bounded connect attempt; if it fails, `llmcli.py` prints one warning line
+naming it and moves on with the rest.
+
+**The safety gate did not change.** Every tool call still requires a manual
+y/n confirmation before it executes, with no auto-execute path. That gate is
+the real safety boundary: `terminal` runs arbitrary commands and `filesystem`
+can read and write anything under its root. The servers themselves never ask;
+a different MCP client pointed at `local_mcp.py` gets no confirmation unless
+it provides its own.
+
+**Context budget.** The enabled servers' merged schema is about 3,300 tokens,
+sent on every request. `llmcli.py` compares the schema against the server's
+real context size at startup and warns if it is tight. A single tool result
+larger than 8,000 characters is cut (head and tail kept) before it goes back
+to the model. A turn may chain up to 20 tool rounds. MCP servers' own stderr
+goes to `~/.cache/local-llm/mcp-servers.log`.
+
+**What's verified.** With no model involved, through `llmcli.py`'s real
+schema and execute path: all twelve servers connect (about 8 s) and every
+local tool was called for real, including the `run_command` timeout path,
+`ask_claude`, `remember`/`recall`, the Dropbox listings, a hackstack scope
+refusal, a browser navigate and snapshot, and the full calculator loop with
+`computer`. With live models and the first seven servers: `qwythos`, `bolt`
+and `nano` each chose the right tool and answered correctly in about a
+minute, `qwen35` in 4.5 minutes; `qwythos` also completed a multi-step turn
+with `ask_claude` and `gh` in parallel. `qwythos` also ran the newer servers end to end: it saved a fact
+with `remember` and answered from `recall` in a later session (the graph
+build in between took 3.5 minutes for one note); it drove the calculator
+through `computer` to compute 6*7 = 42 in seven tool rounds (190 s); and it
+opened a page with `browser` and read its link text correctly, though it
+misidentified the heading. Not verified: `bolt`, `nano` and `qwen35` on the
+newer servers, and long sessions near the context limit.
 
 ## 5. Using the GUI day to day
 
