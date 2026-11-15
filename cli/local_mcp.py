@@ -34,6 +34,7 @@ This server does not ask for confirmation. The client does: llmcli.py confirms
 every tool call with the user before it reaches here.
 """
 import datetime
+import fcntl
 import glob
 import os
 import platform
@@ -321,6 +322,10 @@ NOTES_DIR = os.path.join(MEMORY_DIR, "notes")
 MEMORY_GRAPH = os.path.join(NOTES_DIR, "graphify-out", "graph.json")
 RECALL_NOTES = 3          # full notes returned per recall
 RECALL_NOTE_CHARS = 1500
+# A slow model (the 27B at ~2 tok/s) needs more than graphify's default 600 s per request;
+# with the default it timed out, split the chunk and retried without end.
+SYNC_REQUEST_TIMEOUT_S = 1800
+SYNC_TOTAL_TIMEOUT_S = 3600   # then the whole build is killed; unindexed notes are retried next session
 
 
 def _note_paths():
@@ -373,16 +378,26 @@ def memory_sync(base_url: str) -> int:
         return 0
     if os.path.exists(MEMORY_GRAPH) and os.path.getmtime(MEMORY_GRAPH) >= max(map(os.path.getmtime, notes)):
         return 0
+    # One build at a time: two of them on a single-slot server starve each other. The lock is
+    # held by this process and released by the kernel when it exits, however it exits.
+    lock = open(os.path.join(MEMORY_DIR, "sync.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("memory-sync: another build is already running; leaving it to finish", file=sys.stderr)
+        return 0
     # The installed graphify has no `openai` client, which its OpenAI-compatible backend needs.
     # uvx runs the same version with that extra, without touching the installed tool.
     version = re.search(r"^graphifyy v?(\S+)", _sh(["uv", "tool", "list"]), re.M)
     spec = f"graphifyy[openai]=={version.group(1)}" if version else "graphifyy[openai]"
     env = {**os.environ, "OPENAI_BASE_URL": base_url.rstrip("/") + "/v1", "OPENAI_API_KEY": "none",
            "OPENAI_MODEL": "local"}
-    done = subprocess.run(["uvx", "-q", "--from", spec, "graphify", "extract", NOTES_DIR,
-                           "--backend", "openai", "--max-concurrency", "1"],
-                          stdin=subprocess.DEVNULL, env=env)
-    return done.returncode
+    status, out, err = _run(["uvx", "-q", "--from", spec, "graphify", "extract", NOTES_DIR,
+                             "--backend", "openai", "--max-concurrency", "1",
+                             "--api-timeout", str(SYNC_REQUEST_TIMEOUT_S)],
+                            SYNC_TOTAL_TIMEOUT_S, env=env)
+    print(f"memory-sync: {status}\n{out}\n{err}", file=sys.stderr)
+    return 0 if status == "exit code: 0" else 1
 
 
 # --------------------------------------------------------------------------- dropbox

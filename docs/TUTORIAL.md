@@ -268,7 +268,13 @@ built over the notes. The graph is rebuilt when a `--tools` session ends
 `~/.cache/local-llm/memory-sync.log`): graphify's semantic extraction runs
 against the model that is still loaded, which takes one to four minutes per
 new note. Recall does not wait for it, because it also reads the notes
-directly. The installed `graphify` lacks the `openai` client its
+directly. Only one build runs at a time (a lock file), each request to the
+model may take up to 30 minutes, and the whole build is killed after an
+hour; notes it did not reach are picked up after the next session. On a
+single-slot model (`qwythos`, `qwen35`) the build occupies the model, so a
+session started straight afterwards waits for it: on `qwen35` that wait was
+11 minutes. Swapping models right after a session ends just makes the build
+fail and retry later. The installed `graphify` lacks the `openai` client its
 OpenAI-compatible backend needs, so the sync runs the same version through
 `uvx --from "graphifyy[openai]==<installed version>"`.
 
@@ -326,13 +332,20 @@ refusal, a browser navigate and snapshot, and the full calculator loop with
 `computer`. With live models and the first seven servers: `qwythos`, `bolt`
 and `nano` each chose the right tool and answered correctly in about a
 minute, `qwen35` in 4.5 minutes; `qwythos` also completed a multi-step turn
-with `ask_claude` and `gh` in parallel. `qwythos` also ran the newer servers end to end: it saved a fact
-with `remember` and answered from `recall` in a later session (the graph
-build in between took 3.5 minutes for one note); it drove the calculator
-through `computer` to compute 6*7 = 42 in seven tool rounds (190 s); and it
-opened a page with `browser` and read its link text correctly, though it
-misidentified the heading. Not verified: `bolt`, `nano` and `qwen35` on the
-newer servers, and long sessions near the context limit.
+with `ask_claude` and `gh` in parallel. The newer servers were then run end to end on every model, one task each:
+
+| Task | `qwythos` | `bolt` | `nano` | `qwen35` |
+|---|---|---|---|---|
+| `computer`: calculator, 6*7 = 42 | pass, 190 s | pass, 243 s | pass, 485 s | fail: lost track, timed out at 30 min |
+| `browser`: read a page's link text | pass | pass | fail: never read the page, guessed | pass, 276 s |
+| `dropbox` + `toolsuite` status | not run | pass | pass | pass, 231 s |
+| `remember` | pass | pass | pass | pass, 164 s |
+| `recall` in a later session | pass | pass | pass | pass, 21 min (waited on the graph build) |
+
+`bolt` is the best fit for browser and desktop work: it passed everything and
+has the context to spare. `qwen35` is too slow for multi-step desktop tasks
+on this card. Not verified: long sessions near the context limit, and any
+desktop app other than the calculator.
 
 ## 5. Using the GUI day to day
 
