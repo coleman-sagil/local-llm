@@ -293,6 +293,7 @@ fi
 
 nohup "$LLAMA_SERVER" \
   -m "$MODEL_PATH" \
+  --alias "$MODEL" \
   --host "${LLAMA_HOST:-127.0.0.1}" \
   --port "$PORT" \
   -c "$CTX" \
