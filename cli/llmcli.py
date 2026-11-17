@@ -288,10 +288,13 @@ TOOLS_SYSTEM_PROMPT = (
     "Call a tool only when it is needed to answer; every tool call needs the "
     "user's manual approval before it runs, so don't call tools "
     "speculatively. If a problem is beyond you and an ask_claude tool is "
-    "available, use it rather than guessing. If memory tools are available, "
-    "use recall when the user refers to earlier sessions or to something you "
-    "do not know about them, and use remember to save durable facts worth "
-    "keeping."
+    "available, use it rather than guessing. "
+    "You have persistent memory backed by graphify knowledge graphs shared "
+    "across all models on this machine. Use recall to search notes and the "
+    "knowledge graph when the user refers to earlier sessions or to something "
+    "you don't know. Use graph_search for deeper traversal of the knowledge "
+    "graph (code, docs, relationships). Use remember to save durable facts. "
+    "Use graph_status to see what knowledge is available."
 )
 
 # MCP servers write their own logging to stderr (npm notices, driver warnings).

@@ -86,7 +86,7 @@
     },
     "memory": {
       "enabled": true,
-      "description": "Long-term memory across sessions: remember(title, content) writes a markdown note under ~/.local/share/local-llm/memory/notes; recall(query) returns matching notes plus related topics from the graphify knowledge graph built over them. The graph is rebuilt after each chat by the loaded model (local_mcp.py memory-sync, log in ~/.cache/local-llm/memory-sync.log). 2 tools.",
+      "description": "Long-term memory backed by graphify knowledge graphs: remember(title, content) saves a note, recall(query) keyword-searches notes and queries the graphs, graph_search(query, mode) does deep graph traversal (bfs or dfs), graph_status() shows what graphs exist. All models share the same memory. 4 tools.",
       "command": "uv",
       "args": [
         "run",

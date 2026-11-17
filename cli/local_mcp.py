@@ -319,7 +319,8 @@ def notify(title: str, body: str = "") -> str:
 
 MEMORY_DIR = os.path.expanduser("~/.local/share/local-llm/memory")
 NOTES_DIR = os.path.join(MEMORY_DIR, "notes")
-MEMORY_GRAPH = os.path.join(NOTES_DIR, "graphify-out", "graph.json")
+NOTES_GRAPH = os.path.join(NOTES_DIR, "graphify-out", "graph.json")
+SYSTEM_GRAPH = os.path.expanduser("~/graphify-out/graph.json")
 RECALL_NOTES = 3          # full notes returned per recall
 RECALL_NOTE_CHARS = 1500
 # A slow model (the 27B at ~2 tok/s) needs more than graphify's default 600 s per request;
@@ -363,12 +364,49 @@ def recall(query: str) -> str:
              for _, path, text in scored[:RECALL_NOTES]]
     if len(scored) > RECALL_NOTES:
         parts.append("other matching notes: " + ", ".join(os.path.basename(p) for _, p, _ in scored[RECALL_NOTES:12]))
-    if os.path.exists(MEMORY_GRAPH) and shutil.which("graphify"):
-        graph = _sh(["graphify", "query", query, "--graph", MEMORY_GRAPH, "--budget", "500"], timeout=30)
-        graph = "\n".join(l for l in graph.splitlines() if l.startswith(("NODE", "EDGE")))
-        if graph:
-            parts.append("--- related topics (knowledge graph) ---\n" + graph)
+    if shutil.which("graphify"):
+        for label, gpath in [("notes", NOTES_GRAPH), ("system", SYSTEM_GRAPH)]:
+            if not os.path.exists(gpath):
+                continue
+            out = _sh(["graphify", "query", query, "--graph", gpath, "--budget", "400"], timeout=30)
+            lines = [l for l in out.splitlines() if l.startswith(("NODE", "EDGE"))]
+            if lines:
+                parts.append(f"--- {label} knowledge graph ---\n" + "\n".join(lines))
     return "\n\n".join(parts) if parts else "nothing in memory matches that query"
+
+
+@tool("memory")
+def graph_search(query: str, mode: str = "bfs") -> str:
+    """Search the graphify knowledge graph for concepts, code, or connections. mode: bfs (broad) or dfs (trace a path)."""
+    if not shutil.which("graphify"):
+        raise ToolError("graphify is not installed")
+    graphs = [(l, g) for l, g in [("notes", NOTES_GRAPH), ("system", SYSTEM_GRAPH)] if os.path.exists(g)]
+    if not graphs:
+        raise ToolError("no knowledge graph built yet")
+    flag = ["--dfs"] if mode == "dfs" else []
+    results = []
+    for label, gpath in graphs:
+        out = _sh(["graphify", "query", query, "--graph", gpath, "--budget", "800"] + flag, timeout=30)
+        lines = [l for l in out.splitlines() if l.startswith(("NODE", "EDGE", "HYPER"))]
+        if lines:
+            results.append(f"--- {label} graph ---\n" + "\n".join(lines))
+    return "\n\n".join(results) if results else "no matching nodes in any knowledge graph"
+
+
+@tool("memory")
+def graph_status() -> str:
+    """Show available knowledge graphs and memory notes."""
+    parts = []
+    for label, gpath in [("notes", NOTES_GRAPH), ("system", SYSTEM_GRAPH)]:
+        if os.path.exists(gpath):
+            size_mb = os.path.getsize(gpath) / (1024 * 1024)
+            mtime = datetime.datetime.fromtimestamp(os.path.getmtime(gpath)).strftime("%Y-%m-%d %H:%M")
+            parts.append(f"{label} graph: {gpath} ({size_mb:.0f} MB, updated {mtime})")
+        else:
+            parts.append(f"{label} graph: not built")
+    notes = _note_paths()
+    parts.append(f"notes: {len(notes)} in {NOTES_DIR}")
+    return "\n".join(parts)
 
 
 def memory_sync(base_url: str) -> int:
@@ -376,7 +414,7 @@ def memory_sync(base_url: str) -> int:
     notes = _note_paths()
     if not notes:
         return 0
-    if os.path.exists(MEMORY_GRAPH) and os.path.getmtime(MEMORY_GRAPH) >= max(map(os.path.getmtime, notes)):
+    if os.path.exists(NOTES_GRAPH) and os.path.getmtime(NOTES_GRAPH) >= max(map(os.path.getmtime, notes)):
         return 0
     # One build at a time: two of them on a single-slot server starve each other. The lock is
     # held by this process and released by the kernel when it exits, however it exits.
