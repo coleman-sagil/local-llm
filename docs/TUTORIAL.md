@@ -232,7 +232,7 @@ namespaced `{server}__{tool}`, e.g. `terminal__run_command`,
 | `github` | `gh` | ~90 tok | the already-logged-in `gh` CLI, argument list, no shell |
 | `claude` | `ask_claude` | ~110 tok | escalates a question to Claude (see below) |
 | `desktop` | `open_path`, `notify` | ~150 tok | `xdg-open` and `notify-send` |
-| `memory` | `remember`, `recall` | ~180 tok | long-term memory backed by graphify (see below) |
+| `memory` | `remember`, `recall`, `graph_search`, `graph_status` | ~350 tok | long-term memory backed by graphify (see below) |
 | `dropbox` | `dropbox_find`, `dropbox_recent`, `dropbox_status` | ~270 tok | the locally synced `~/*Dropbox*` folders |
 | `toolsuite` | `hackstack`, `hackstack_targets` | ~190 tok | `~/toolsuite/hackstack`'s scope-gated `hs-*` wrappers |
 | `browser` | 9 | ~940 tok | opt-in: headless Chromium via `@playwright/mcp`, cut from 25 tools |
@@ -260,22 +260,27 @@ only as structured data into the text result, and `squeeze_indent` shrinks
 deeply indented output. That is how `cua-driver`'s 60 tools / ~24K tokens
 became 5 tools / ~770 tokens.
 
-**`memory`.** `remember(title, content)` writes a markdown note to
-`~/.local/share/local-llm/memory/notes/`. `recall(query)` returns the best
-matching notes in full, plus related topics from a graphify knowledge graph
-built over the notes. The graph is rebuilt when a `--tools` session ends
-(`local_mcp.py memory-sync`, run detached, log in
-`~/.cache/local-llm/memory-sync.log`): graphify's semantic extraction runs
-against the model that is still loaded, which takes one to four minutes per
-new note. Recall does not wait for it, because it also reads the notes
-directly. Only one build runs at a time (a lock file), each request to the
-model may take up to 30 minutes, and the whole build is killed after an
-hour; notes it did not reach are picked up after the next session. On a
-single-slot model (`qwythos`, `qwen35`) the build occupies the model, so a
-session started straight afterwards waits for it: on `qwen35` that wait was
-11 minutes. Swapping models right after a session ends just makes the build
-fail and retry later. The installed `graphify` lacks the `openai` client its
-OpenAI-compatible backend needs, so the sync runs the same version through
+**`memory`.** All four models share the same persistent memory, backed by
+graphify knowledge graphs. Four tools:
+
+- `remember(title, content)` writes a markdown note to
+  `~/.local/share/local-llm/memory/notes/`.
+- `recall(query)` keyword-searches notes and queries both knowledge graphs
+  (notes graph + system graph).
+- `graph_search(query, mode)` does direct BFS or DFS traversal of the
+  knowledge graphs — deeper than recall, good for tracing connections.
+- `graph_status()` shows what graphs exist, their size, and when they were
+  last updated.
+
+Two graphs: a **notes graph** built from model-written notes (rebuilt when a
+session ends, via `local_mcp.py memory-sync`), and a **system graph** at
+`~/graphify-out/graph.json` built by running graphify over the home
+directory. The notes graph uses graphify's semantic extraction against the
+loaded model (1–4 min per note). Recall does not wait for it because it also
+reads the notes directly. Only one build runs at a time (lock file), each
+request may take 30 min, the whole build is killed after an hour; notes it
+didn't reach are picked up next session. The installed `graphify` lacks the
+`openai` client its backend needs, so the sync runs through
 `uvx --from "graphifyy[openai]==<installed version>"`.
 
 **`computer`.** Text-only models cannot read screenshots, so this drives apps
