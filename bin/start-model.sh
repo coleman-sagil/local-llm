@@ -181,6 +181,7 @@ case "$MODEL" in
     #   -ngl 99 -c 16384 -> 4743 MiB used / 1011 MiB free (verified)
     #   -ngl 99 -c 32768 -> 4951 MiB used / 803 MiB free (verified)
     # ponytail: 32K fits with ~800 MiB headroom; SSM layers don't need KV cache
+    # note: chat template supports --reasoning-preserve; enable if reasoning output is wanted
     PORT="${LLAMA_PORT:-8097}"
     MODEL_PATH="$ROOT_DIR/models/nemotron-nano-4b-uncensored/Nemotron3-Nano-4B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf"
     GPU_CTX=32768
@@ -191,17 +192,24 @@ case "$MODEL" in
     # Qwythos-9B (Claude-Mythos finetune, reasoning model): 9.2B params,
     # Q4_K_M = 5.5GB file, 1M native context. Thinks before every answer
     # (reasoning_content), so budget tokens accordingly.
-    # Measured on RTX 2060 Max-Q (6144 MiB total), -ngl 99 -fa on, q8_0 KV, -np 1:
+    # Measured on RTX 2060 Max-Q (6144 MiB total), -ngl 99 -fa on, -np 1:
+    #  q8_0 KV (old):
     #   -c 16384 -> 5623 MiB used / 521 MiB free (verified through a generation)
     #   -c 24576 -> OOM (176 MiB compute buffer would not fit)
     #   -c 32768 -> OOM (216 MiB compute buffer would not fit)
-    # ponytail: 16384 is the ceiling on this card; QWYTHOS_CTX overrides it for re-measuring
+    #  q4_0 KV (current, measured 2026-11-25):
+    #   -c 24576 -> 5607 MiB used / 146 MiB free (verified through a generation)
+    #   -c 28672 -> 5663 MiB used /  90 MiB free (too tight for daily use)
+    #   -c 32768 -> 5719 MiB used /  34 MiB free (works but OOM-prone)
+    #  ~14 MiB per 1K tokens of additional context at q4_0
+    # ponytail: 24576 is the safe ceiling at q4_0; QWYTHOS_CTX overrides for re-measuring
     PORT="${LLAMA_PORT:-8098}"
     MODEL_PATH="$ROOT_DIR/models/Qwythos-9B-Claude-Mythos-5-1M-MTP-Q4_K_M.gguf"
-    GPU_CTX="${QWYTHOS_CTX:-16384}"
+    GPU_CTX="${QWYTHOS_CTX:-24576}"
     MOE=0
     AGENT_MODE=1
     SINGLE_USER=1
+    KV_QUANT="q4_0"
     ;;
 esac
 
@@ -255,12 +263,18 @@ else
       EXTRA_ARGS+=(--reasoning-preserve)
     fi
   else
-    # Dense: every layer on GPU, Flash Attention on, q8_0 K+V cache. -fa and
+    # Dense: every layer on GPU, Flash Attention on, quantized K+V cache. -fa and
     # the symmetric q8_0/q8_0 D128 fused kernel are both confirmed working on
     # this Turing / sm_75 build (no -DGGML_CUDA_FA_ALL_QUANTS needed). q8_0 KV
     # roughly halves the cache and is what keeps these 7-8B models inside 6GB
     # at a useful context. See the per-model GPU_CTX comments for measured VRAM.
-    EXTRA_ARGS=(-ngl 99 -fa on --cache-type-k q8_0 --cache-type-v q8_0 --threads "$THREADS")
+    # KV_QUANT (set per-model above) overrides the default q8_0; e.g. qwythos uses q4_0.
+    KV_Q="${KV_QUANT:-q8_0}"
+    EXTRA_ARGS=(-ngl 99 -fa on --cache-type-k "$KV_Q" --cache-type-v "$KV_Q" --threads "$THREADS")
+  fi
+  # Reasoning models: preserve chain-of-thought tokens in output
+  if [[ "$MODEL" == "qwythos" ]]; then
+    EXTRA_ARGS+=(--reasoning-preserve)
   fi
   # Single-user mode: 1 slot, all context for one session
   if [[ "${SINGLE_USER:-0}" -eq 1 ]]; then
